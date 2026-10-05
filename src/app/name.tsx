@@ -1,13 +1,22 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import {
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { layout, spacing } from '../lib/theme';
+import {
+  BackButton,
+  Card,
+  FadeIn,
+  Field,
+  Heading,
+  PrimaryButton,
+  Screen,
+} from '../lib/ui';
 
 export default function NameScreen() {
   const params = useLocalSearchParams<{
@@ -23,166 +32,74 @@ export default function NameScreen() {
 
   const [name, setName] = useState('');
 
-  const canContinue =
-    name.trim().length > 0 && role !== null;
+  const canContinue = name.trim().length > 0 && role !== null;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
+    <Screen>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <BackButton onPress={() => router.back()} />
 
-        <Pressable
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <Text style={styles.backText}>
-            ‹
-          </Text>
-        </Pressable>
-
-        <View style={styles.content}>
-
-          <Text style={styles.eyebrow}>
-            NICE TO MEET YOU
-          </Text>
-
-          <Text style={styles.title}>
-            What should we call you?
-          </Text>
-
-          <Text style={styles.subtitle}>
-            Choose the name your partner will see
-            inside Between Us.
-          </Text>
-
-          <TextInput
-            value={name}
-            onChangeText={setName}
-            placeholder="Your name"
-            placeholderTextColor="#B7A7AE"
-            autoCapitalize="words"
-            autoCorrect={false}
-            style={styles.input}
+        <FadeIn style={styles.content}>
+          <Heading
+            eyebrow="Nice to meet you"
+            title="What should we call you?"
+            subtitle="Choose the name your partner will see inside Between Us."
           />
 
+          <Card style={styles.card}>
+            <Field
+              label="Your name"
+              value={name}
+              onChangeText={setName}
+              placeholder="Your name"
+              autoCapitalize="words"
+              autoCorrect={false}
+            />
+          </Card>
+        </FadeIn>
+
+        <View>
+          <PrimaryButton
+            label="Continue"
+            disabled={!canContinue}
+            onPress={() => {
+              if (!role || !name.trim()) {
+                return;
+              }
+
+              router.push({
+                pathname: '/create-code',
+                params: {
+                  role,
+                  name: name.trim(),
+                },
+              });
+            }}
+          />
         </View>
-
-        <Pressable
-          disabled={!canContinue}
-          style={[
-            styles.button,
-            !canContinue && styles.buttonDisabled,
-          ]}
-          onPress={() => {
-            if (!role || !name.trim()) {
-              return;
-            }
-
-            router.push({
-              pathname: '/create-code',
-              params: {
-                role,
-                name: name.trim(),
-              },
-            });
-          }}
-        >
-          <Text style={styles.buttonText}>
-            Continue
-          </Text>
-        </Pressable>
-
-      </View>
-    </SafeAreaView>
+      </KeyboardAvoidingView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#FFF9FB',
-  },
-
   container: {
     flex: 1,
-    paddingHorizontal: 22,
-    paddingTop: 14,
-    paddingBottom: 24,
-  },
-
-  backButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#F0E1E6',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  backText: {
-    marginTop: -3,
-    fontSize: 31,
-    fontWeight: '300',
-    color: '#604A54',
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xl,
   },
 
   content: {
     flex: 1,
     justifyContent: 'center',
-    paddingBottom: 60,
+    paddingBottom: spacing.xxxl,
   },
 
-  eyebrow: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 2,
-    color: '#B47789',
-    marginBottom: 12,
-  },
-
-  title: {
-    fontSize: 31,
-    fontWeight: '700',
-    letterSpacing: -0.8,
-    color: '#30292D',
-  },
-
-  subtitle: {
-    marginTop: 9,
-    maxWidth: 310,
-    fontSize: 14,
-    lineHeight: 21,
-    color: '#8E8189',
-  },
-
-  input: {
-    marginTop: 28,
-    height: 58,
-    borderRadius: 17,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#ECDDE3',
-    paddingHorizontal: 17,
-    fontSize: 16,
-    color: '#342C31',
-  },
-
-  button: {
-    height: 54,
-    borderRadius: 17,
-    backgroundColor: '#9E6377',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  buttonDisabled: {
-    backgroundColor: '#D9C5CC',
-  },
-
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
+  card: {
+    marginTop: spacing.xxl,
   },
 });

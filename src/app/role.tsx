@@ -1,23 +1,31 @@
-import { router, useLocalSearchParams } from 'expo-router';
 import {
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
+  router,
+  useLocalSearchParams,
+} from 'expo-router';
+
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
+
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function RoleScreen() {
-  const params = useLocalSearchParams();
-
-  const rawRole = params.role;
+  const params =
+    useLocalSearchParams<{
+      role?: string;
+    }>();
 
   const role =
-    Array.isArray(rawRole)
-      ? rawRole[0]
-      : rawRole;
+    params.role === 'girlfriend'
+      ? 'girlfriend'
+      : params.role === 'boyfriend'
+        ? 'boyfriend'
+        : null;
 
-  if (role !== 'boyfriend' && role !== 'girlfriend') {
+  if (!role) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.errorContainer}>
@@ -26,14 +34,11 @@ export default function RoleScreen() {
             Choose your role first
           </Text>
 
-          <Text style={styles.errorText}>
-            Please go back and choose whether
-            you're the boyfriend or girlfriend.
-          </Text>
-
           <Pressable
             style={styles.button}
-            onPress={() => router.replace('/get-started')}
+            onPress={() =>
+              router.replace('/get-started')
+            }
           >
             <Text style={styles.buttonText}>
               Choose Role
@@ -153,7 +158,6 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 34,
     fontWeight: '600',
-    letterSpacing: -1,
     color: '#30292D',
   },
 
@@ -161,7 +165,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontSize: 42,
     fontWeight: '800',
-    letterSpacing: -1.5,
     color: '#9E6377',
   },
 
@@ -189,23 +192,15 @@ const styles = StyleSheet.create({
 
   errorContainer: {
     flex: 1,
-    paddingHorizontal: 24,
-    alignItems: 'center',
+    padding: 24,
     justifyContent: 'center',
   },
 
   errorTitle: {
+    textAlign: 'center',
     fontSize: 21,
     fontWeight: '700',
     color: '#30292D',
-  },
-
-  errorText: {
-    marginTop: 8,
-    maxWidth: 300,
-    fontSize: 14,
-    lineHeight: 20,
-    color: '#8E8189',
-    textAlign: 'center',
+    marginBottom: 20,
   },
 });

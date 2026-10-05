@@ -1,241 +1,121 @@
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import {
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StyleSheet, Text, View } from 'react-native';
+
+import { colors, layout, radius, shadow, spacing } from '../lib/theme';
+import { BackButton, FadeIn, Heading, PressScale, Screen } from '../lib/ui';
+
+const ROLES = [
+  { key: 'girlfriend', label: 'Girlfriend' },
+  { key: 'boyfriend', label: 'Boyfriend' },
+] as const;
 
 export default function GetStartedScreen() {
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <Screen>
       <View style={styles.container}>
+        <BackButton onPress={() => router.replace('/')} />
 
-        <Pressable
-          style={styles.backButton}
-          onPress={() => router.replace('/')}
-        >
-          <Text style={styles.backText}>
-            ‹
-          </Text>
-        </Pressable>
-
-        <View style={styles.content}>
-
-          <Text style={styles.eyebrow}>
-            LET'S BEGIN
-          </Text>
-
-          <Text style={styles.title}>
-            Who are you?
-          </Text>
-
-          <Text style={styles.subtitle}>
-            Choose the role you'll use inside
-            Between Us.
-          </Text>
+        <FadeIn style={styles.content}>
+          <Heading
+            eyebrow="Let's begin"
+            title="Who are you?"
+            subtitle="Choose the role you'll use inside Between Us."
+          />
 
           <View style={styles.options}>
+            {ROLES.map((role) => (
+              <PressScale
+                key={role.key}
+                style={styles.roleCard}
+                contentStyle={styles.roleContent}
+                onPress={() =>
+                  router.push({
+                    pathname: '/role',
+                    params: { role: role.key },
+                  })
+                }
+              >
+                <View style={styles.avatar}>
+                  <Ionicons name="person-outline" size={22} color={colors.blue} />
+                </View>
 
-            <Pressable
-              style={({ pressed }) => [
-                styles.roleCard,
-                pressed && styles.pressed,
-              ]}
-              onPress={() => {
-                router.push('/name?role=girlfriend');
-              }}
-            >
-              <View style={styles.girlAvatar}>
-                <Text style={styles.avatarText}>
-                  G
-                </Text>
-              </View>
+                <View style={styles.roleInfo}>
+                  <Text style={styles.roleTitle}>{role.label}</Text>
+                  <Text style={styles.roleDescription}>
+                    Your identity inside Between Us.
+                  </Text>
+                </View>
 
-              <View style={styles.roleInfo}>
-                <Text style={styles.roleTitle}>
-                  Girlfriend
-                </Text>
-
-                <Text style={styles.roleDescription}>
-                  Your identity inside Between Us.
-                </Text>
-              </View>
-
-              <Text style={styles.arrow}>
-                ›
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.roleCard,
-                pressed && styles.pressed,
-              ]}
-              onPress={() => {
-                router.push('/name?role=boyfriend');
-              }}
-            >
-              <View style={styles.boyAvatar}>
-                <Text style={styles.avatarText}>
-                  B
-                </Text>
-              </View>
-
-              <View style={styles.roleInfo}>
-                <Text style={styles.roleTitle}>
-                  Boyfriend
-                </Text>
-
-                <Text style={styles.roleDescription}>
-                  Your identity inside Between Us.
-                </Text>
-              </View>
-
-              <Text style={styles.arrow}>
-                ›
-              </Text>
-            </Pressable>
-
+                <Ionicons
+                  name="chevron-forward"
+                  size={20}
+                  color={colors.textFaint}
+                />
+              </PressScale>
+            ))}
           </View>
-
-        </View>
-
+        </FadeIn>
       </View>
-    </SafeAreaView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#FFF9FB',
-  },
-
   container: {
     flex: 1,
-    paddingHorizontal: 22,
-    paddingTop: 14,
-    paddingBottom: 24,
-  },
-
-  backButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#F0E1E6',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  backText: {
-    fontSize: 31,
-    fontWeight: '300',
-    color: '#604A54',
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xxl,
   },
 
   content: {
     flex: 1,
     justifyContent: 'center',
-  },
-
-  eyebrow: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 2,
-    color: '#B47789',
-    marginBottom: 10,
-  },
-
-  title: {
-    fontSize: 34,
-    fontWeight: '700',
-    letterSpacing: -1,
-    color: '#30292D',
-  },
-
-  subtitle: {
-    marginTop: 9,
-    maxWidth: 310,
-    fontSize: 14,
-    lineHeight: 21,
-    color: '#8E8189',
+    paddingBottom: spacing.xxxl,
   },
 
   options: {
-    marginTop: 28,
-    gap: 13,
+    marginTop: spacing.xxxl,
+    gap: spacing.md,
   },
 
   roleCard: {
-    minHeight: 94,
-    borderRadius: 22,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#F0E1E6',
-    paddingHorizontal: 17,
+    borderRadius: radius.xl,
+    backgroundColor: colors.surface,
+    ...shadow.card,
+  },
+
+  roleContent: {
+    minHeight: 96,
+    paddingHorizontal: spacing.xl,
     flexDirection: 'row',
     alignItems: 'center',
   },
 
-  pressed: {
-    opacity: 0.75,
-    transform: [
-      {
-        scale: 0.985,
-      },
-    ],
-  },
-
-  girlAvatar: {
-    width: 51,
-    height: 51,
-    borderRadius: 26,
-    backgroundColor: '#E7DFED',
+  avatar: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.pill,
+    backgroundColor: colors.blueSoft,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-
-  boyAvatar: {
-    width: 51,
-    height: 51,
-    borderRadius: 26,
-    backgroundColor: '#EFD5DE',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  avatarText: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#805466',
   },
 
   roleInfo: {
     flex: 1,
-    marginLeft: 14,
+    marginLeft: spacing.lg,
   },
 
   roleTitle: {
     fontSize: 16,
-    fontWeight: '700',
-    color: '#342C31',
+    fontWeight: '600',
+    color: colors.text,
   },
 
   roleDescription: {
-    marginTop: 4,
-    fontSize: 11,
-    lineHeight: 16,
-    color: '#95868E',
-  },
-
-  arrow: {
-    fontSize: 27,
-    fontWeight: '300',
-    color: '#B78D9D',
-    marginLeft: 8,
+    marginTop: 3,
+    fontSize: 12,
+    color: colors.textMuted,
   },
 });

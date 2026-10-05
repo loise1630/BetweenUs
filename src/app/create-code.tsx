@@ -1,27 +1,34 @@
-import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+
 import {
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
+  router,
+  useLocalSearchParams,
+  useNavigation,
+} from 'expo-router';
+
+import { CommonActions } from 'expo-router/react-navigation';
+import { useState } from 'react';
+
+import {
+  ActivityIndicator,
+  Alert,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
+
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-function generateCode() {
-  const characters =
-    'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+import {
+  ensureAnonymousSession,
+  getAccountState,
+  saveAccountState,
+} from '../lib/account';
 
-  let result = '';
+import { supabase } from '../lib/supabase';
 
-  for (let i = 0; i < 6; i++) {
-    result += characters.charAt(
-      Math.floor(Math.random() * characters.length)
-    );
-  }
-
-  return result;
-}
+import { colors, layout, radius, shadow, spacing, type } from '../lib/theme';
+import { BackButton, FadeIn, PressScale } from '../lib/ui';
 
 export default function CreateCodeScreen() {
   const params = useLocalSearchParams<{
@@ -29,69 +36,102 @@ export default function CreateCodeScreen() {
     name?: string;
   }>();
 
-  const code = useMemo(() => generateCode(), []);
+  const navigation = useNavigation();
+  const [loading, setLoading] = useState(false);
+
+  async function handleCreate() {
+    if (!params.role || !params.name) {
+      Alert.alert(
+        'Missing information',
+        'Please go back and complete your name and role.'
+      );
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      await ensureAnonymousSession();
+
+      const { data, error } = await supabase.rpc('create_pairing_invite', {
+        p_name: String(params.name),
+        p_role: params.role,
+      });
+
+      if (error) throw error;
+
+      if (!data?.success || !data?.code) {
+        throw new Error('Unable to create your pairing code.');
+      }
+
+      const state = await getAccountState();
+      await saveAccountState(state);
+
+      navigation.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [{ name: 'home' }],
+        })
+      );
+    } catch (error: any) {
+      console.error('CREATE CODE ERROR:', error);
+
+      Alert.alert(
+        'Unable to create account',
+        error?.message || 'Something went wrong. Please try again.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        <Pressable
-          onPress={() => router.back()}
-          style={({ pressed }) => [
-            styles.backButton,
-            pressed && styles.pressed,
-          ]}
-        >
-          <Text style={styles.backText}>‹</Text>
-        </Pressable>
+        <BackButton onPress={() => router.back()} disabled={loading} />
 
-        <View style={styles.content}>
+        <FadeIn style={styles.content}>
           <View style={styles.iconCircle}>
-            <Text style={styles.icon}>♡</Text>
+            <Ionicons name="heart-outline" size={26} color={colors.red} />
           </View>
 
-          <Text style={styles.eyebrow}>CREATE AN INVITE</Text>
-
-          <Text style={styles.title}>
-            Invite your partner.
-          </Text>
-
+          <Text style={styles.eyebrow}>Create an invite</Text>
+          <Text style={styles.title}>Invite your partner.</Text>
           <Text style={styles.subtitle}>
-            Share this code with your partner to
-            connect your spaces.
+            Your pairing code will stay connected to your Between Us account.
           </Text>
 
           <View style={styles.codeCard}>
-            <Text style={styles.codeLabel}>
-              YOUR PAIRING CODE
-            </Text>
+            <View style={styles.lockRow}>
+              <Ionicons
+                name="lock-closed-outline"
+                size={14}
+                color={colors.textFaint}
+              />
+              <Text style={styles.codeLabel}>Your pairing code</Text>
+            </View>
 
-            <Text style={styles.code}>
-              {code}
+            <Text style={styles.code}>••••••</Text>
+
+            <Text style={styles.codeHint}>
+              Your real code will be created securely by Between Us.
             </Text>
           </View>
+        </FadeIn>
 
-          <Pressable
-            onPress={() =>
-              router.replace({
-                pathname: '/home',
-                params: {
-                  role: params.role,
-                  name: params.name,
-                  code,
-                },
-              })
-            }
-            style={({ pressed }) => [
-              styles.button,
-              pressed && styles.buttonPressed,
-            ]}
+        <View style={styles.bottom}>
+          <PressScale
+            disabled={loading}
+            onPress={handleCreate}
+            style={[styles.button, loading && styles.buttonDisabled]}
+            contentStyle={styles.buttonContent}
           >
-            <Text style={styles.buttonText}>
-              Continue
-            </Text>
-
-            <Text style={styles.buttonArrow}>→</Text>
-          </Pressable>
+            {loading ? (
+              <ActivityIndicator color={colors.white} />
+            ) : (
+              <Text style={styles.buttonText}>Create My Account</Text>
+            )}
+          </PressScale>
         </View>
       </View>
     </SafeAreaView>
@@ -101,128 +141,116 @@ export default function CreateCodeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#FFF9FB',
+    backgroundColor: colors.background,
   },
 
   container: {
     flex: 1,
-    paddingHorizontal: 22,
-  },
-
-  backButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#F0E1E6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-
-  backText: {
-    fontSize: 30,
-    lineHeight: 32,
-    color: '#6F5961',
-    marginTop: -3,
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.md,
   },
 
   content: {
-    marginTop: 67,
+    flex: 1,
+    paddingTop: spacing.xxxl + spacing.md,
   },
 
   iconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#FBECEF',
+    width: 60,
+    height: 60,
+    borderRadius: radius.pill,
+    backgroundColor: colors.redSoft,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 25,
-  },
-
-  icon: {
-    fontSize: 32,
-    color: '#B56F84',
+    marginBottom: spacing.xl,
   },
 
   eyebrow: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 2,
-    color: '#B47789',
-    marginBottom: 9,
+    ...type.label,
+    textTransform: 'uppercase',
+    letterSpacing: 1.6,
+    color: colors.red,
+    marginBottom: spacing.sm,
   },
 
   title: {
-    fontSize: 33,
-    fontWeight: '700',
-    letterSpacing: -0.8,
-    color: '#2E282C',
+    ...type.display,
+    color: colors.text,
   },
 
   subtitle: {
-    marginTop: 10,
+    marginTop: spacing.sm,
     maxWidth: 325,
-    fontSize: 14,
-    lineHeight: 21,
-    color: '#8D7D84',
+    fontSize: 15,
+    lineHeight: 22,
+    color: colors.textMuted,
   },
 
   codeCard: {
-    marginTop: 35,
-    backgroundColor: '#F8F0F8',
-    borderRadius: 24,
+    marginTop: spacing.xxxl,
+    borderRadius: radius.xl,
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#EDE0EF',
-    paddingVertical: 27,
+    borderColor: colors.border,
+    paddingVertical: spacing.xxxl,
+    paddingHorizontal: spacing.xl,
     alignItems: 'center',
+    ...shadow.card,
+  },
+
+  lockRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
 
   codeLabel: {
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 1.8,
-    color: '#AA8399',
-    marginBottom: 10,
+    ...type.label,
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+    color: colors.textFaint,
   },
 
   code: {
-    fontSize: 31,
-    fontWeight: '800',
-    letterSpacing: 6,
-    color: '#714C63',
+    marginTop: spacing.md,
+    fontSize: 34,
+    fontWeight: '700',
+    letterSpacing: 8,
+    color: colors.text,
+  },
+
+  codeHint: {
+    marginTop: spacing.lg,
+    textAlign: 'center',
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.textMuted,
+  },
+
+  bottom: {
+    paddingBottom: spacing.xl,
   },
 
   button: {
-    marginTop: 14,
-    height: 54,
-    borderRadius: 18,
-    backgroundColor: '#9E6377',
-    flexDirection: 'row',
+    height: layout.touch + 2,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primary,
+    ...shadow.soft,
+  },
+
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+
+  buttonContent: {
+    height: layout.touch + 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   buttonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-
-  buttonArrow: {
-    marginLeft: 9,
-    color: '#FFFFFF',
-    fontSize: 19,
-  },
-
-  pressed: {
-    opacity: 0.7,
-  },
-
-  buttonPressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.985 }],
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

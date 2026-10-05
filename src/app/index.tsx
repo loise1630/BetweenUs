@@ -1,5 +1,7 @@
 import { router } from 'expo-router';
+import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Pressable,
   StyleSheet,
   Text,
@@ -7,7 +9,65 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import {
+  getAccountState,
+} from '../lib/account';
+
 export default function LandingScreen() {
+  const [checking, setChecking] =
+    useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function checkExistingAccount() {
+      try {
+        const state =
+          await getAccountState();
+
+        if (!mounted) {
+          return;
+        }
+
+        if (
+          state.status === 'waiting' ||
+          state.status === 'paired'
+        ) {
+          router.replace('/home');
+          return;
+        }
+      } catch (error) {
+        console.log(
+          'ACCOUNT CHECK:',
+          error
+        );
+      } finally {
+        if (mounted) {
+          setChecking(false);
+        }
+      }
+    }
+
+    checkExistingAccount();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  if (checking) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.loading}>
+          <ActivityIndicator
+            size="small"
+            color="#9E6377"
+          />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
@@ -60,6 +120,17 @@ export default function LandingScreen() {
             </Text>
           </Pressable>
 
+          <Pressable
+            style={styles.loginButton}
+            onPress={() => {
+              router.push('/login-code');
+            }}
+          >
+            <Text style={styles.loginText}>
+              Login with Code
+            </Text>
+          </Pressable>
+
         </View>
 
       </View>
@@ -78,6 +149,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 35,
     paddingBottom: 28,
+  },
+
+  loading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   logo: {
@@ -154,6 +231,18 @@ const styles = StyleSheet.create({
 
   secondaryText: {
     color: '#775565',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+
+  loginButton: {
+    height: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  loginText: {
+    color: '#9E6377',
     fontSize: 13,
     fontWeight: '700',
   },
