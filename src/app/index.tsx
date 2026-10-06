@@ -1,3 +1,4 @@
+import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
@@ -6,12 +7,56 @@ import {
   StyleSheet,
   Text,
   View,
+  ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   getAccountState,
 } from '../lib/account';
+
+/**
+ * Soft "blurred" blob built from stacked translucent ellipses
+ * (no extra libraries needed).
+ */
+function SoftBlob({
+  width,
+  height,
+  color,
+  style,
+}: {
+  width: number;
+  height: number;
+  color: string;
+  style?: ViewStyle;
+}) {
+  const layers = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4];
+
+  return (
+    <View style={[{ width, height }, style]} pointerEvents="none">
+      {layers.map((scale) => {
+        const w = width * scale;
+        const h = height * scale;
+
+        return (
+          <View
+            key={scale}
+            style={{
+              position: 'absolute',
+              width: w,
+              height: h,
+              left: (width - w) / 2,
+              top: (height - h) / 2,
+              borderRadius: Math.max(w, h) / 2,
+              backgroundColor: color,
+              opacity: 0.09,
+            }}
+          />
+        );
+      })}
+    </View>
+  );
+}
 
 export default function LandingScreen() {
   const [checking, setChecking] =
@@ -61,7 +106,7 @@ export default function LandingScreen() {
         <View style={styles.loading}>
           <ActivityIndicator
             size="small"
-            color="#9E6377"
+            color="#E5609F"
           />
         </View>
       </SafeAreaView>
@@ -72,34 +117,46 @@ export default function LandingScreen() {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
 
-        <View style={styles.logo}>
-          <Text style={styles.logoHeart}>
-            ♡
+        <View style={styles.header}>
+          <Text style={styles.wordmark}>
+            Between
+            <Text style={styles.wordmarkAccent}>
+              Us
+            </Text>
+          </Text>
+
+          <Text style={styles.tagline}>
+            For everything you don't always know how to say.
           </Text>
         </View>
 
-        <View style={styles.content}>
+        <View style={styles.visual}>
+          <View style={styles.blobArea}>
+            <SoftBlob
+              width={200}
+              height={190}
+              color="#7FA2F2"
+              style={styles.blueBlob}
+            />
 
-          <Text style={styles.brand}>
-            BETWEEN US
-          </Text>
+            <SoftBlob
+              width={200}
+              height={190}
+              color="#FF8FA8"
+              style={styles.pinkBlob}
+            />
 
-          <Text style={styles.title}>
-            For everything you don't
-            always know how to say.
-          </Text>
-
-          <Text style={styles.subtitle}>
-            A private space for two people
-            to stay connected.
-          </Text>
-
+            <View style={styles.lens} />
+          </View>
         </View>
 
         <View style={styles.actions}>
 
           <Pressable
-            style={styles.primaryButton}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              pressed && styles.pressed,
+            ]}
             onPress={() => {
               router.push('/get-started');
             }}
@@ -107,28 +164,52 @@ export default function LandingScreen() {
             <Text style={styles.primaryText}>
               Get Started
             </Text>
+            <Feather
+              name="arrow-right"
+              size={22}
+              color="#FFFFFF"
+              style={styles.primaryArrow}
+            />
           </Pressable>
 
           <Pressable
-            style={styles.secondaryButton}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              pressed && styles.pressed,
+            ]}
             onPress={() => {
               router.push('/join');
             }}
           >
+            <Feather
+              name="link"
+              size={20}
+              color="#17181C"
+              style={styles.secondaryIcon}
+            />
             <Text style={styles.secondaryText}>
-              Join with a Pairing Code
+              Join with a pairing code
             </Text>
           </Pressable>
 
           <Pressable
-            style={styles.loginButton}
+            style={({ pressed }) => [
+              styles.loginButton,
+              pressed && styles.pressed,
+            ]}
             onPress={() => {
               router.push('/login-code');
             }}
           >
             <Text style={styles.loginText}>
-              Login with Code
+              Login with code
             </Text>
+            <Feather
+              name="arrow-right"
+              size={16}
+              color="#6B7280"
+              style={styles.loginArrow}
+            />
           </Pressable>
 
         </View>
@@ -141,13 +222,12 @@ export default function LandingScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#FFF9FB',
+    backgroundColor: '#FDFDFB',
   },
 
   container: {
     flex: 1,
     paddingHorizontal: 24,
-    paddingTop: 35,
     paddingBottom: 28,
   },
 
@@ -157,93 +237,130 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  logo: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: '#F3DCE4',
+  header: {
+    alignItems: 'center',
+    marginTop: 72,
+  },
+
+  wordmark: {
+    fontSize: 46,
+    fontWeight: '600',
+    letterSpacing: -1.8,
+    color: '#121217',
+  },
+
+  wordmarkAccent: {
+    color: '#E5609F',
+  },
+
+  tagline: {
+    marginTop: 26,
+    maxWidth: 250,
+    textAlign: 'center',
+    fontSize: 21,
+    lineHeight: 29,
+    fontWeight: '300',
+    color: '#5B6470',
+  },
+
+  visual: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  logoHeart: {
-    fontSize: 31,
-    color: '#9E6377',
+  blobArea: {
+    width: 300,
+    height: 260,
   },
 
-  content: {
-    flex: 1,
-    justifyContent: 'center',
+  blueBlob: {
+    position: 'absolute',
+    left: 0,
+    top: 20,
   },
 
-  brand: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 2.5,
-    color: '#B47789',
-    marginBottom: 13,
+  pinkBlob: {
+    position: 'absolute',
+    left: 100,
+    top: 50,
   },
 
-  title: {
-    maxWidth: 330,
-    fontSize: 38,
-    lineHeight: 44,
-    fontWeight: '700',
-    letterSpacing: -1.2,
-    color: '#30292D',
-  },
-
-  subtitle: {
-    marginTop: 17,
-    maxWidth: 290,
-    fontSize: 14,
-    lineHeight: 21,
-    color: '#8E8189',
+  lens: {
+    position: 'absolute',
+    left: 108,
+    top: 65,
+    width: 84,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: 'rgba(150, 140, 225, 0.30)',
+    borderWidth: 1,
+    borderColor: 'rgba(150, 140, 225, 0.35)',
+    transform: [{ rotate: '35deg' }],
   },
 
   actions: {
-    gap: 11,
+    gap: 16,
   },
 
   primaryButton: {
-    height: 55,
-    borderRadius: 17,
-    backgroundColor: '#9E6377',
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: '#17181C',
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   primaryText: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '500',
+  },
+
+  primaryArrow: {
+    position: 'absolute',
+    right: 28,
   },
 
   secondaryButton: {
-    height: 52,
-    borderRadius: 17,
-    backgroundColor: '#FFFFFF',
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: '#EADCE2',
+    borderColor: '#C9D2E0',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
   },
 
+  secondaryIcon: {
+    marginRight: 14,
+  },
+
   secondaryText: {
-    color: '#775565',
-    fontSize: 13,
-    fontWeight: '700',
+    color: '#17181C',
+    fontSize: 17,
+    fontWeight: '400',
   },
 
   loginButton: {
-    height: 50,
+    height: 44,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   loginText: {
-    color: '#9E6377',
-    fontSize: 13,
-    fontWeight: '700',
+    color: '#6B7280',
+    fontSize: 15,
+    fontWeight: '400',
+  },
+
+  loginArrow: {
+    marginLeft: 10,
+  },
+
+  pressed: {
+    opacity: 0.75,
   },
 });

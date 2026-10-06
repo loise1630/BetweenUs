@@ -1,6 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
+
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+
+import { useCallback, useState } from 'react';
+
 import {
   ActivityIndicator,
   ScrollView,
@@ -12,7 +15,15 @@ import {
 
 import { AccountState, getAccountState } from '../lib/account';
 
-import { colors, layout, radius, shadow, spacing, type } from '../lib/theme';
+import {
+  colors,
+  layout,
+  radius,
+  shadow,
+  spacing,
+  type,
+} from '../lib/theme';
+
 import {
   Card,
   FadeIn,
@@ -23,18 +34,29 @@ import {
 
 const ROLES = ['boyfriend', 'girlfriend'] as const;
 
+type Role = (typeof ROLES)[number];
+
 export default function HomeScreen() {
-  const [account, setAccount] = useState<AccountState | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [hidden, setHidden] = useState(true);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [account, setAccount] =
+    useState<AccountState | null>(null);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [hidden, setHidden] =
+    useState(true);
 
   const loadAccount = useCallback(async () => {
     try {
-      const state = await getAccountState();
+      const state =
+        await getAccountState();
+
       setAccount(state);
     } catch (error) {
-      console.error('HOME ACCOUNT ERROR:', error);
+      console.error(
+        'HOME ACCOUNT ERROR:',
+        error
+      );
     } finally {
       setLoading(false);
     }
@@ -43,26 +65,30 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       loadAccount();
-      const interval = setInterval(loadAccount, 5000);
-      return () => clearInterval(interval);
+
+      const interval =
+        setInterval(
+          loadAccount,
+          5000
+        );
+
+      return () =>
+        clearInterval(interval);
     }, [loadAccount])
   );
 
-  // UI only: start with the current user's card selected
-  useEffect(() => {
-    if (selected || !account?.members) return;
-    const me = (account.members as any[]).find(
-      (m) => m.user_id === account.user_id
-    );
-    if (me) setSelected(me.role);
-  }, [account, selected]);
-
   async function shareCode() {
-    const code = account?.pairing_code || account?.login_code;
-    if (!code) return;
+    const code =
+      account?.pairing_code ||
+      account?.login_code;
+
+    if (!code) {
+      return;
+    }
 
     await Share.share({
-      message: `Join me on Between Us using this code: ${code}`,
+      message:
+        `Join me on Between Us using this code: ${code}`,
     });
   }
 
@@ -70,116 +96,227 @@ export default function HomeScreen() {
     router.push('/settings');
   }
 
+  function openRole(role: Role) {
+    if (role === 'boyfriend') {
+      router.push('/boyfriend');
+      return;
+    }
+
+    router.push('/girlfriend');
+  }
+
   if (loading) {
     return (
       <Screen>
         <View style={styles.loading}>
-          <ActivityIndicator color={colors.blue} />
+          <ActivityIndicator
+            color={colors.blue}
+          />
         </View>
       </Screen>
     );
   }
 
-  if (!account || account.status === 'new') {
+  if (
+    !account ||
+    account.status === 'new'
+  ) {
     router.replace('/');
     return null;
   }
 
-  const members = account.members || [];
-  const isWaiting = account.status === 'waiting';
-  const code = account.pairing_code || account.login_code || '------';
-  const displayCode = hidden ? '••••••' : code;
+  const members =
+    account.members || [];
+
+  const isWaiting =
+    account.status === 'waiting';
+
+  const code =
+    account.pairing_code ||
+    account.login_code ||
+    '------';
+
+  const displayCode =
+    hidden
+      ? '••••••'
+      : code;
 
   return (
     <Screen>
       <ScrollView
-        contentContainerStyle={styles.container}
+        contentContainerStyle={
+          styles.container
+        }
         showsVerticalScrollIndicator={false}
       >
         {/* TOP BAR */}
+
         <FadeIn style={styles.topBar}>
           <View style={styles.brandMark}>
-            <Ionicons name="heart" size={14} color={colors.red} />
+            <Ionicons
+              name="heart"
+              size={14}
+              color={colors.red}
+            />
           </View>
 
-          <IconButton name="settings-outline" onPress={openSettings} />
+          <IconButton
+            name="settings-outline"
+            onPress={openSettings}
+          />
         </FadeIn>
 
         {/* HEADER */}
-        <FadeIn delay={60} style={styles.titleBlock}>
-          <Text style={styles.title}>Between Us</Text>
+
+        <FadeIn
+          delay={60}
+          style={styles.titleBlock}
+        >
+          <Text style={styles.title}>
+            Between Us
+          </Text>
+
           <Text style={styles.subtitle}>
             {isWaiting
               ? 'Your account is ready. Your partner can join with your code.'
-              : 'Your shared space is connected.'}
+              : 'Choose who you are to continue.'}
           </Text>
         </FadeIn>
 
         {/* WHO'S USING */}
+
         <FadeIn delay={120}>
-          <Text style={styles.sectionLabel}>Who's Using?</Text>
+          <Text style={styles.sectionLabel}>
+            Who's Using?
+          </Text>
 
           <View style={styles.peopleRow}>
             {ROLES.map((role) => {
-              const member = members.find((m: any) => m.role === role);
-              const isYou = !!member && member.user_id === account.user_id;
-              const isSelected = selected === role;
+              const member =
+                members.find(
+                  (m: any) =>
+                    m.role === role
+                );
 
-              const statusText = isYou
-                ? 'You'
-                : member
-                ? 'Connected'
-                : 'Waiting';
+              const isYou =
+                !!member &&
+                member.user_id ===
+                  account.user_id;
 
-              const dotColor = isYou
-                ? colors.blue
-                : member
-                ? colors.textFaint
-                : colors.red;
+              const statusText =
+                isYou
+                  ? 'You'
+                  : member
+                  ? 'Connected'
+                  : 'Waiting';
+
+              const dotColor =
+                isYou
+                  ? colors.blue
+                  : member
+                  ? colors.textFaint
+                  : colors.red;
+
+              const roleName =
+                role === 'boyfriend'
+                  ? 'Boyfriend'
+                  : 'Girlfriend';
 
               return (
                 <PressScale
                   key={role}
-                  onPress={() => setSelected(role)}
-                  style={[styles.personCard, isSelected && styles.personCardActive]}
-                  contentStyle={styles.personContent}
+                  onPress={() =>
+                    openRole(role)
+                  }
+                  scaleTo={0.96}
+                  style={
+                    styles.personCard
+                  }
+                  contentStyle={
+                    styles.personContent
+                  }
                 >
-                  {isSelected && (
-                    <View style={styles.check}>
-                      <Ionicons name="checkmark" size={12} color={colors.white} />
-                    </View>
-                  )}
-
-                  <View style={[styles.avatar, isSelected && styles.avatarActive]}>
-                    {member?.name ? (
-                      <Text
-                        style={[
-                          styles.avatarText,
-                          isSelected && styles.avatarTextActive,
-                        ]}
-                      >
-                        {member.name.charAt(0).toUpperCase()}
-                      </Text>
-                    ) : (
-                      <Ionicons
-                        name="person-outline"
-                        size={26}
-                        color={colors.textFaint}
-                      />
-                    )}
+                  <View
+                    style={
+                      styles.roleIconWrap
+                    }
+                  >
+                    <Ionicons
+                      name={
+                        role ===
+                        'boyfriend'
+                          ? 'person-outline'
+                          : 'person-outline'
+                      }
+                      size={30}
+                      color={
+                        colors.textMuted
+                      }
+                    />
                   </View>
 
-                  <Text style={styles.roleName}>
-                    {role === 'boyfriend' ? 'Boyfriend' : 'Girlfriend'}
+                  <Text
+                    style={
+                      styles.roleName
+                    }
+                  >
+                    {roleName}
                   </Text>
 
-                  <Text style={styles.memberName} numberOfLines={1}>
-                    {member?.name || 'Not joined yet'}
+                  <Text
+                    style={
+                      styles.memberName
+                    }
+                    numberOfLines={1}
+                  >
+                    {member?.name ||
+                      'Not joined yet'}
                   </Text>
 
-                  <View style={styles.statusPill}>
-                    <View style={[styles.dot, { backgroundColor: dotColor }]} />
-                    <Text style={styles.statusText}>{statusText}</Text>
+                  <View
+                    style={
+                      styles.statusPill
+                    }
+                  >
+                    <View
+                      style={[
+                        styles.dot,
+                        {
+                          backgroundColor:
+                            dotColor,
+                        },
+                      ]}
+                    />
+
+                    <Text
+                      style={
+                        styles.statusText
+                      }
+                    >
+                      {statusText}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={
+                      styles.enterRow
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.enterText
+                      }
+                    >
+                      Open
+                    </Text>
+
+                    <Ionicons
+                      name="arrow-forward"
+                      size={14}
+                      color={
+                        colors.textMuted
+                      }
+                    />
                   </View>
                 </PressScale>
               );
@@ -188,46 +325,111 @@ export default function HomeScreen() {
         </FadeIn>
 
         {/* CODE */}
+
         <FadeIn delay={180}>
-          <Card style={styles.codeCard}>
-            <View style={styles.codeRow}>
-              <View style={styles.codeTextBlock}>
-                <Text style={styles.codeLabel}>
-                  {isWaiting ? 'Pairing code' : 'Code'}
+          <Card
+            style={[
+              styles.codeCard,
+              !isWaiting &&
+                styles.codeCardCompact,
+            ]}
+          >
+            <View
+              style={styles.codeRow}
+            >
+              <View
+                style={
+                  styles.codeTextBlock
+                }
+              >
+                <Text
+                  style={
+                    styles.codeLabel
+                  }
+                >
+                  {isWaiting
+                    ? 'Pairing code'
+                    : 'Account code'}
                 </Text>
-                <Text style={styles.code}>{displayCode}</Text>
+
+                <Text
+                  style={[
+                    styles.code,
+                    !isWaiting &&
+                      styles.codeCompact,
+                  ]}
+                >
+                  {displayCode}
+                </Text>
               </View>
 
               <PressScale
-                onPress={() => setHidden((h) => !h)}
+                onPress={() =>
+                  setHidden(
+                    (h) => !h
+                  )
+                }
                 scaleTo={0.9}
-                style={styles.eyeButton}
-                contentStyle={styles.eyeButtonContent}
+                style={
+                  styles.eyeButton
+                }
+                contentStyle={
+                  styles.eyeButtonContent
+                }
               >
                 <Ionicons
-                  name={hidden ? 'eye-outline' : 'eye-off-outline'}
+                  name={
+                    hidden
+                      ? 'eye-outline'
+                      : 'eye-off-outline'
+                  }
                   size={20}
-                  color={colors.textMuted}
+                  color={
+                    colors.textMuted
+                  }
                 />
               </PressScale>
             </View>
 
-            <Text style={styles.codeHint}>
-              {isWaiting
-                ? 'Share this code with your partner so they can join.'
-                : 'Keep this code somewhere safe.'}
-            </Text>
+            {isWaiting ? (
+              <>
+                <Text
+                  style={
+                    styles.codeHint
+                  }
+                >
+                  Share this code with
+                  your partner so they
+                  can join.
+                </Text>
 
-            {isWaiting && (
-              <PressScale
-                onPress={shareCode}
-                style={styles.shareButton}
-                contentStyle={styles.shareButtonContent}
-              >
-                <Ionicons name="share-outline" size={18} color={colors.white} />
-                <Text style={styles.shareButtonText}>Share code</Text>
-              </PressScale>
-            )}
+                <PressScale
+                  onPress={shareCode}
+                  style={
+                    styles.shareButton
+                  }
+                  contentStyle={
+                    styles.shareButtonContent
+                  }
+                >
+                  <Ionicons
+                    name="share-outline"
+                    size={18}
+                    color={
+                      colors.white
+                    }
+                  />
+
+                  <Text
+                    style={
+                      styles.shareButtonText
+                    }
+                  >
+                    Share code
+                  </Text>
+                </PressScale>
+              </>
+            ) : null}
           </Card>
         </FadeIn>
       </ScrollView>
@@ -237,7 +439,8 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: layout.screenPadding,
+    paddingHorizontal:
+      layout.screenPadding,
     paddingTop: spacing.md,
     paddingBottom: 60,
   },
@@ -251,14 +454,16 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent:
+      'space-between',
   },
 
   brandMark: {
     width: 36,
     height: 36,
     borderRadius: radius.pill,
-    backgroundColor: colors.surface,
+    backgroundColor:
+      colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
     ...shadow.soft,
@@ -300,56 +505,30 @@ const styles = StyleSheet.create({
   personCard: {
     flex: 1,
     borderRadius: radius.xl,
-    backgroundColor: colors.surface,
-    borderWidth: 1.5,
-    borderColor: 'transparent',
+    backgroundColor:
+      colors.surface,
+    borderWidth: 1,
+    borderColor:
+      colors.surfaceAlt,
     ...shadow.soft,
-  },
-
-  personCardActive: {
-    borderColor: colors.blue,
-    ...shadow.card,
   },
 
   personContent: {
     alignItems: 'center',
-    paddingVertical: spacing.xxl,
-    paddingHorizontal: spacing.md,
+    paddingVertical:
+      spacing.xxl,
+    paddingHorizontal:
+      spacing.md,
   },
 
-  check: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: colors.blue,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  avatar: {
+  roleIconWrap: {
     width: 72,
     height: 72,
     borderRadius: radius.pill,
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor:
+      colors.surfaceAlt,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-
-  avatarActive: {
-    backgroundColor: colors.blueSoft,
-  },
-
-  avatarText: {
-    fontSize: 24,
-    fontWeight: '500',
-    color: colors.textMuted,
-  },
-
-  avatarTextActive: {
-    color: colors.blue,
   },
 
   roleName: {
@@ -373,7 +552,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: radius.pill,
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor:
+      colors.surfaceAlt,
   },
 
   dot: {
@@ -388,15 +568,35 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
 
+  enterRow: {
+    marginTop: spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+
+  enterText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+
   codeCard: {
     marginTop: spacing.xl,
     padding: spacing.xxl,
   },
 
+  codeCardCompact: {
+    paddingVertical: spacing.lg,
+    paddingHorizontal:
+      spacing.xl,
+  },
+
   codeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent:
+      'space-between',
   },
 
   codeTextBlock: {
@@ -417,11 +617,18 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
 
+  codeCompact: {
+    marginTop: 5,
+    fontSize: 18,
+    letterSpacing: 3,
+  },
+
   eyeButton: {
     width: 46,
     height: 46,
     borderRadius: radius.pill,
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor:
+      colors.surfaceAlt,
   },
 
   eyeButtonContent: {
@@ -442,7 +649,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.xl,
     height: layout.touch,
     borderRadius: radius.pill,
-    backgroundColor: colors.primary,
+    backgroundColor:
+      colors.primary,
   },
 
   shareButtonContent: {
