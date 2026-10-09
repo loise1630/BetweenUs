@@ -1,2522 +1,2275 @@
-import { Feather } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
-
+import { ReactNode, useCallback, useMemo, useRef, useState } from 'react';
 import {
-    useCallback,
-    useState,
-} from 'react';
-
-import {
-    ActivityIndicator,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
-    getAccountState,
-    type AccountState,
-} from '../lib/account';
-
-import {
-    getCurrentCycleInfo,
-    getPeriodDashboard,
-    type CyclePhase,
-    type PeriodDashboard,
+  addDays,
+  calculatePeriodLength,
+  createPeriod,
+  CyclePhase,
+  deletePeriod,
+  deletePeriodSymptom,
+  getCurrentCycleInfo,
+  getCycleInfoForDate,
+  getPeriodDashboard,
+  getPredictedNextPeriod,
+  getTodaySymptoms,
+  isDateInPeriod,
+  parseDate,
+  PeriodDashboard,
+  PeriodLog,
+  PeriodSettings,
+  savePeriodSymptom,
+  SymptomSeverity,
+  updatePeriod,
 } from '../lib/period';
 
-// ============================================================
-// THEME
-// Based on the Between Us landing-screen style
-// ============================================================
+import { getAccountState } from '../lib/account';
+import { FadeIn, IconButton, PressScale, Screen } from '../lib/ui';
 
-const COLORS = {
-  background: '#FDFDFB',
-  white: '#FFFFFF',
+/* ============================================================
+   PHASE IMAGES  (file is in src/app/, so ../../assets/ = project root)
+   ============================================================ */
 
-  charcoal: '#17181C',
-  text: '#25262B',
-  muted: '#6B7280',
-  faint: '#9AA1AC',
-
-  pink: '#E5609F',
-  pinkSoft: '#FCE8F1',
-  pinkBorder: '#F2D3E1',
-
-  blue: '#7FA2F2',
-  blueSoft: '#EEF3FD',
-  blueBorder: '#D9E4FA',
-
-  lavender: '#9690E1',
-  lavenderSoft: '#F1F0FC',
-
-  green: '#72A88A',
-  greenSoft: '#ECF6F0',
-
-  orange: '#D99A62',
-  orangeSoft: '#FFF3E7',
-
-  border: '#C9D2E0',
-  softBorder: '#E8EBF0',
-
-  danger: '#C96C7F',
+const PHASE_IMAGES: Record<CyclePhase, any> = {
+  Period: require('../../assets/images/menstrual.png'),
+  Follicular: require('../../assets/images/follicular-phase.png'),
+  Ovulation: require('../../assets/images/ovulation-phase.png'),
+  Luteal: require('../../assets/images/luteal-phase.png'),
 };
 
-// ============================================================
-// HELPERS
-// ============================================================
+/* ============================================================
+   ROUTES
+   ============================================================ */
+
+const ROUTES = {
+  want: '/want',
+  unsaid: '/unsaid',
+  littleThings: '/little-things',
+  insights: '/insights',
+};
+
+/* ============================================================
+   COLORS
+   ============================================================ */
+
+const BG = '#FBF7F7';
+const CARD = '#FFFFFF';
+const TEXT = '#20273A';
+const MUTED = '#7C8294';
+const FAINT = '#A8ADBB';
+
+const PINK = '#F4768F';
+const PINK_SOFT = '#FDE7EC';
+const PINK_BORDER = '#F7D8DF';
+
+const PURPLE = '#A58BE0';
+const PURPLE_SOFT = '#F0EBFB';
+
+const BLUE = '#7099E8';
+const BLUE_SOFT = '#EAF0FC';
+
+const PEACH = '#F29A82';
+const PEACH_SOFT = '#FDECE7';
+
+const GOLD = '#E3A93F';
+const GOLD_SOFT = '#FCF3DD';
+
+const GREEN = '#70B58E';
+
+const LINE = '#F0E3E6';
+
+/* ============================================================
+   PHASE COPY
+   ============================================================ */
+
+const PHASE_COPY: Record<
+  CyclePhase,
+  {
+    title: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    accent: string;
+    line1: string;
+    line2: string;
+    partnerLine1: string;
+    partnerLine2: string;
+  }
+> = {
+  Period: {
+    title: 'Menstruation',
+    icon: 'water',
+    accent: PINK,
+    line1: 'Your body is renewing.',
+    line2: 'Take it easy today.',
+    partnerLine1: 'She may need extra care.',
+    partnerLine2: 'Be gentle and patient today.',
+  },
+  Follicular: {
+    title: 'Follicular',
+    icon: 'leaf',
+    accent: GREEN,
+    line1: 'Your energy is building.',
+    line2: 'A fresh start is here.',
+    partnerLine1: 'Her energy is building.',
+    partnerLine2: 'A good time for something fun.',
+  },
+  Ovulation: {
+    title: 'Ovulation',
+    icon: 'flower',
+    accent: PEACH,
+    line1: 'You may feel more energetic.',
+    line2: 'Enjoy the extra energy.',
+    partnerLine1: 'She may feel more energetic.',
+    partnerLine2: 'Plan something special together.',
+  },
+  Luteal: {
+    title: 'Luteal',
+    icon: 'moon',
+    accent: PURPLE,
+    line1: 'Time to slow down.',
+    line2: 'Be gentle with yourself.',
+    partnerLine1: 'She may feel more tired.',
+    partnerLine2: 'Small kindnesses can go a long way.',
+  },
+};
+
+/* ============================================================
+   OPTIONS
+   ============================================================ */
+
+const SYMPTOM_OPTIONS = [
+  'Cramps',
+  'Headache',
+  'Bloating',
+  'Fatigue',
+  'Back pain',
+  'Cravings',
+  'Nausea',
+  'Breast tenderness',
+];
+
+const MOOD_OPTIONS = ['Happy', 'Calm', 'Sad', 'Anxious', 'Irritable'];
+
+const SEVERITY_OPTIONS: SymptomSeverity[] = ['mild', 'moderate', 'strong'];
+
+/* how many period logs are visible before "Show older" */
+const LOGS_PREVIEW_COUNT = 5;
+
+type SheetName = 'calendar' | 'symptoms' | 'logs' | null;
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
 
 function todayString() {
-  const now = new Date();
-
-  const year = now.getFullYear();
-
-  const month = String(
-    now.getMonth() + 1
-  ).padStart(2, '0');
-
-  const day = String(
-    now.getDate()
-  ).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
+  const date = new Date();
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
 }
 
-function parseDate(value: string) {
-  return new Date(`${value}T12:00:00`);
+function formatReadableDate(value: string | null) {
+  if (!value) return 'Not enough data';
+  const date = new Date(`${value}T12:00:00`);
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
-function formatDate(value: string | null | undefined) {
-  if (!value) {
-    return 'Not available';
-  }
-
-  const date = parseDate(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return 'Not available';
-  }
-
-  return date.toLocaleDateString(
-    undefined,
-    {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    }
-  );
+function formatShortDate(value: string) {
+  const date = new Date(`${value}T12:00:00`);
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  });
 }
 
-function formatShortDate(
-  value: string | null | undefined
-) {
-  if (!value) {
-    return '—';
-  }
-
-  const date = parseDate(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return '—';
-  }
-
-  return date.toLocaleDateString(
-    undefined,
-    {
-      month: 'short',
-      day: 'numeric',
-    }
-  );
+function getMonthTitle(date: Date) {
+  return date.toLocaleDateString(undefined, {
+    month: 'long',
+    year: 'numeric',
+  });
 }
 
-function addDays(
-  value: string,
-  amount: number
-) {
-  const date = parseDate(value);
-
-  date.setDate(
-    date.getDate() + amount
-  );
-
-  const year = date.getFullYear();
-
-  const month = String(
-    date.getMonth() + 1
-  ).padStart(2, '0');
-
-  const day = String(
-    date.getDate()
-  ).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
+function capitalize(value: string) {
+  if (!value) return '';
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function daysBetween(
-  start: string,
-  end: string
-) {
-  const startDate = parseDate(start);
-  const endDate = parseDate(end);
-
-  const difference =
-    endDate.getTime() -
-    startDate.getTime();
-
-  return Math.round(
-    difference /
-      (1000 * 60 * 60 * 24)
-  );
-}
-
-function phaseColor(
-  phase: CyclePhase | null
-) {
-  switch (phase) {
-    case 'Period':
-      return COLORS.pink;
-
-    case 'Follicular':
-      return COLORS.orange;
-
-    case 'Ovulation':
-      return COLORS.blue;
-
-    case 'Luteal':
-      return COLORS.lavender;
-
-    default:
-      return COLORS.muted;
-  }
-}
-
-function phaseBackground(
-  phase: CyclePhase | null
-) {
-  switch (phase) {
-    case 'Period':
-      return COLORS.pinkSoft;
-
-    case 'Follicular':
-      return COLORS.orangeSoft;
-
-    case 'Ovulation':
-      return COLORS.blueSoft;
-
-    case 'Luteal':
-      return COLORS.lavenderSoft;
-
-    default:
-      return '#F4F5F7';
-  }
-}
-
-function phaseIcon(
-  phase: CyclePhase | null
-) {
-  switch (phase) {
-    case 'Period':
-      return 'droplet';
-
-    case 'Follicular':
-      return 'sun';
-
-    case 'Ovulation':
-      return 'sparkles';
-
-    case 'Luteal':
-      return 'moon';
-
-    default:
-      return 'activity';
-  }
-}
-
-function phaseDescription(
-  phase: CyclePhase | null
-) {
-  switch (phase) {
-    case 'Period':
-      return 'Period phase';
-
-    case 'Follicular':
-      return 'Energy may gradually rise';
-
-    case 'Ovulation':
-      return 'Estimated fertile window';
-
-    case 'Luteal':
-      return 'The body is preparing for the next period';
-
-    default:
-      return 'Cycle phase is being estimated';
-  }
-}
-
-// ============================================================
-// CALENDAR
-// ============================================================
-
-type CalendarDay = {
-  date: string;
-  day: number;
-  currentMonth: boolean;
-};
-
-function buildCalendarDays(
-  month: Date
-): CalendarDay[] {
+function buildCalendarDays(month: Date) {
   const year = month.getFullYear();
   const monthIndex = month.getMonth();
+  const firstDay = new Date(year, monthIndex, 1).getDay();
+  const totalDays = new Date(year, monthIndex + 1, 0).getDate();
+  const days: (number | null)[] = [];
 
-  const firstDay = new Date(
-    year,
-    monthIndex,
-    1
-  );
+  for (let i = 0; i < firstDay; i++) days.push(null);
+  for (let day = 1; day <= totalDays; day++) days.push(day);
+  while (days.length % 7 !== 0) days.push(null);
 
-  const lastDay = new Date(
-    year,
-    monthIndex + 1,
-    0
-  );
-
-  const firstWeekday =
-    firstDay.getDay();
-
-  const daysInMonth =
-    lastDay.getDate();
-
-  const result: CalendarDay[] = [];
-
-  for (
-    let index = firstWeekday - 1;
-    index >= 0;
-    index--
-  ) {
-    const date = new Date(
-      year,
-      monthIndex,
-      -index
-    );
-
-    result.push({
-      date: toDateString(date),
-      day: date.getDate(),
-      currentMonth: false,
-    });
-  }
-
-  for (
-    let day = 1;
-    day <= daysInMonth;
-    day++
-  ) {
-    const date = new Date(
-      year,
-      monthIndex,
-      day
-    );
-
-    result.push({
-      date: toDateString(date),
-      day,
-      currentMonth: true,
-    });
-  }
-
-  let nextDay = 1;
-
-  while (
-    result.length % 7 !== 0
-  ) {
-    const date = new Date(
-      year,
-      monthIndex + 1,
-      nextDay
-    );
-
-    result.push({
-      date: toDateString(date),
-      day: date.getDate(),
-      currentMonth: false,
-    });
-
-    nextDay++;
-  }
-
-  return result;
+  return days;
 }
 
-function toDateString(
-  date: Date
-) {
-  const year = date.getFullYear();
-
-  const month = String(
-    date.getMonth() + 1
-  ).padStart(2, '0');
-
-  const day = String(
-    date.getDate()
-  ).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
+function formatCalendarDate(month: Date, day: number) {
+  const year = month.getFullYear();
+  const monthNumber = String(month.getMonth() + 1).padStart(2, '0');
+  const dayNumber = String(day).padStart(2, '0');
+  return `${year}-${monthNumber}-${dayNumber}`;
 }
 
-// ============================================================
-// SCREEN
-// ============================================================
+function groupByYear(list: PeriodLog[]): [string, PeriodLog[]][] {
+  const map = new Map<string, PeriodLog[]>();
 
-export default function BoyfriendScreen() {
-  // ----------------------------------------------------------
-  // IMPORTANT:
-  // ALL HOOKS ARE DECLARED BEFORE ANY RETURN.
-  // This fixes the React "Rendered more hooks..." error.
-  // ----------------------------------------------------------
+  list.forEach((period) => {
+    const year = period.start_date.slice(0, 4);
+    map.set(year, [...(map.get(year) || []), period]);
+  });
 
-  const [account, setAccount] =
-    useState<AccountState | null>(
-      null
-    );
+  return Array.from(map.entries());
+}
 
-  const [dashboard, setDashboard] =
-    useState<PeriodDashboard | null>(
-      null
-    );
+type Role = 'girlfriend' | 'boyfriend' | 'unknown';
 
-  const [loading, setLoading] =
-    useState(true);
+function detectRole(account: any): Role {
+  if (!account) return 'unknown';
 
-  const [errorMessage, setErrorMessage] =
-    useState<string | null>(null);
+  if (account.is_girlfriend === true || account.isGirlfriend === true) {
+    return 'girlfriend';
+  }
+  if (account.is_boyfriend === true || account.isBoyfriend === true) {
+    return 'boyfriend';
+  }
 
-  const [month, setMonth] =
-    useState(new Date());
+  const values = [
+    account.role,
+    account.user_role,
+    account.relationship_role,
+    account.partner_role,
+    account.account_role,
+    account.account_type,
+  ]
+    .filter((value) => typeof value === 'string')
+    .map((value: string) => value.toLowerCase().trim());
 
-  // ----------------------------------------------------------
-  // LOAD
-  // ----------------------------------------------------------
+  if (values.some((v) => v === 'girlfriend' || v === 'girl' || v === 'female')) {
+    return 'girlfriend';
+  }
+  if (values.some((v) => v === 'boyfriend' || v === 'boy' || v === 'male')) {
+    return 'boyfriend';
+  }
 
-  const load = useCallback(
-    async () => {
-      try {
-        setErrorMessage(null);
+  return 'unknown';
+}
 
-        const state =
-          await getAccountState();
+function partnerHasData(data: PeriodDashboard | null) {
+  if (!data?.partner) return false;
 
-        setAccount(state);
-
-        const data =
-          await getPeriodDashboard();
-
-        setDashboard(data);
-      } catch (error: any) {
-        console.error(
-          'BOYFRIEND PERIOD LOAD:',
-          error
-        );
-
-        setErrorMessage(
-          error?.message ||
-            'Unable to load cycle information.'
-        );
-      } finally {
-        setLoading(false);
-      }
-    },
-    []
+  return (
+    (data.partner.periods?.length || 0) > 0 ||
+    !!data.partner.settings?.latest_period_start
   );
+}
+
+const FALLBACK_SETTINGS: PeriodSettings = {
+  tracking_enabled: true,
+  average_cycle_length: 28,
+  average_period_length: 5,
+};
+
+/* ============================================================
+   SCREEN
+   ============================================================ */
+
+export default function PeriodScreen() {
+  const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+
+  const [dashboard, setDashboard] = useState<PeriodDashboard | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const [viewerMode, setViewerMode] = useState(false);
+  const [ready, setReady] = useState(false);
+
+  const [month, setMonth] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
+  const [sheet, setSheet] = useState<SheetName>(null);
+  const [showAllLogs, setShowAllLogs] = useState(false);
+
+  const [symptomType, setSymptomType] = useState<string | null>(null);
+  const [severity, setSeverity] = useState<SymptomSeverity>('mild');
+  const [mood, setMood] = useState<string | null>(null);
+
+  const scrollRef = useRef<ScrollView>(null);
+
+  /* ---------- load ---------- */
+
+  const loadDashboard = useCallback(async () => {
+    try {
+      const data = await getPeriodDashboard();
+      setDashboard(data);
+    } catch (error: any) {
+      console.error('PERIOD LOAD ERROR:', error);
+      Alert.alert(
+        'Unable to load period data',
+        error?.message || 'Please check your connection and try again.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  /* ---------- boot ---------- */
 
   useFocusEffect(
     useCallback(() => {
-      load();
-    }, [load])
+      let mounted = true;
+
+      async function boot() {
+        try {
+          const account: any = await getAccountState();
+          let role = detectRole(account);
+          let preloaded: PeriodDashboard | null = null;
+
+          /*
+           * If the account has no role info, decide using the data:
+           * no own periods + partner has shared data = boyfriend/viewer.
+           */
+          if (role === 'unknown') {
+            preloaded = await getPeriodDashboard();
+
+            role =
+              partnerHasData(preloaded) && preloaded.own.periods.length === 0
+                ? 'boyfriend'
+                : 'girlfriend';
+          }
+
+          const isBoyfriend = role === 'boyfriend';
+
+          if (!mounted) return;
+
+          setViewerMode(isBoyfriend);
+
+          /* Girlfriend must finish setup first. Boyfriend never does. */
+          if (!isBoyfriend) {
+            const userId = account?.user_id || account?.id || null;
+            const setupKey = userId
+              ? `@betweenus_period_setup_v1_${userId}`
+              : '@betweenus_period_setup_v1';
+
+            const setupComplete = await AsyncStorage.getItem(setupKey);
+
+            if (!setupComplete && mounted) {
+              router.replace('/period-setup');
+              return;
+            }
+          }
+
+          setReady(true);
+
+          if (preloaded) {
+            setDashboard(preloaded);
+            setLoading(false);
+          } else {
+            await loadDashboard();
+          }
+        } catch (error) {
+          console.error('PERIOD BOOT ERROR:', error);
+
+          if (mounted) {
+            setReady(true);
+            await loadDashboard();
+          }
+        }
+      }
+
+      boot();
+
+      return () => {
+        mounted = false;
+      };
+    }, [loadDashboard])
   );
 
-  // ==========================================================
-  // DERIVED VALUES
-  // NO HOOKS BELOW THIS POINT.
-  // ==========================================================
+  /* ---------- derived data ---------- */
+
+  const ownPeriods = dashboard?.own?.periods || [];
+  const ownSymptoms = dashboard?.own?.symptoms || [];
+  const ownSettings = dashboard?.own?.settings || null;
+
+  const partnerData = dashboard?.partner || null;
+  const partnerSettings = partnerData?.settings || null;
+  const partnerPeriodsRaw = partnerData?.periods || [];
+  const partnerSymptoms = partnerData?.symptoms || [];
+  const partnerLatestStart = partnerSettings?.latest_period_start ?? null;
+
+  /*
+   * Boyfriend always sees everything she logs.
+   * If only the latest start date is available, use that.
+   */
+  const sharedPeriods: PeriodLog[] =
+    partnerPeriodsRaw.length > 0
+      ? partnerPeriodsRaw
+      : partnerLatestStart
+      ? [
+          {
+            id: 'shared-summary',
+            start_date: partnerLatestStart,
+            end_date: null,
+            notes: null,
+          },
+        ]
+      : [];
+
+  const periods: PeriodLog[] = viewerMode ? sharedPeriods : ownPeriods;
+  const symptoms = viewerMode ? partnerSymptoms : ownSymptoms;
+
+  const baseSettings: PeriodSettings = ownSettings || FALLBACK_SETTINGS;
+
+  const settings: PeriodSettings = viewerMode
+    ? {
+        ...baseSettings,
+        average_cycle_length:
+          partnerSettings?.average_cycle_length ||
+          baseSettings.average_cycle_length ||
+          28,
+        average_period_length:
+          partnerSettings?.average_period_length ||
+          baseSettings.average_period_length ||
+          5,
+      }
+    : baseSettings;
+
+  const calendarDays = useMemo(() => buildCalendarDays(month), [month]);
+
+  const sortedPeriods = [...periods].sort((a, b) =>
+    b.start_date.localeCompare(a.start_date)
+  );
+
+  const latestPeriod = sortedPeriods.length > 0 ? sortedPeriods[0] : null;
+
+  const hasCycleData = periods.length > 0;
+  const cycleLength = settings.average_cycle_length || 28;
+  const periodLength = settings.average_period_length || 5;
+
+  const cycleInfo = getCurrentCycleInfo(periods, settings);
 
   const today = todayString();
 
-  const members =
-    account?.members || [];
+  /* strip: start at latest period while early in the cycle, else today */
+  const stripStart =
+    latestPeriod && cycleInfo.cycleDay && cycleInfo.cycleDay <= 10
+      ? latestPeriod.start_date
+      : today;
 
-  const girlfriend =
-    members.find(
-      (member: any) =>
-        member.role === 'girlfriend'
-    );
+  const stripDates: string[] = Array.from({ length: 10 }, (_, index) =>
+    addDays(stripStart, index)
+  );
 
-  const girlfriendName =
-    girlfriend?.name ||
-    'Her';
+  const activeDate =
+    selectedDate && stripDates.includes(selectedDate)
+      ? selectedDate
+      : stripDates.includes(today)
+      ? today
+      : stripDates[0];
 
-  /*
-   * getPeriodDashboard() returns the current user's
-   * own data plus partner data.
-   *
-   * We intentionally read partner data defensively here
-   * so this screen keeps working even if the RPC returns
-   * slightly different nullable shapes.
-   */
-  const rawDashboard =
-    dashboard as any;
+  const activeInfo = getCycleInfoForDate(periods, settings, activeDate);
 
-  const partnerData =
-    rawDashboard?.partner ??
-    rawDashboard?.partner_period ??
-    rawDashboard?.partner_period_data ??
-    null;
+  const activePhase: CyclePhase = activeInfo.phase || 'Period';
+  const activeCopy = PHASE_COPY[activePhase];
+  const phaseImage = PHASE_IMAGES[hasCycleData ? activePhase : 'Period'];
 
-  const partnerSettings =
-    partnerData?.settings ??
-    partnerData?.period_settings ??
-    null;
+  const predictedNext =
+    viewerMode && partnerSettings?.predicted_next_period
+      ? partnerSettings.predicted_next_period
+      : getPredictedNextPeriod(periods, cycleLength);
 
-  const partnerPeriods =
-    Array.isArray(
-      partnerData?.periods
-    )
-      ? partnerData.periods
-      : [];
+  const todaySymptoms = getTodaySymptoms(symptoms);
 
-  const partnerSymptoms =
-    Array.isArray(
-      partnerData?.symptoms
-    )
-      ? partnerData.symptoms
-      : [];
+  const loggedPeriodLength = latestPeriod
+    ? calculatePeriodLength(latestPeriod)
+    : null;
 
-  const visibility =
-    partnerSettings?.partner_visibility ??
-    'private';
+  const displayPeriodLength = loggedPeriodLength || periodLength;
 
-  // ----------------------------------------------------------
-  // CURRENT CYCLE
-  // ----------------------------------------------------------
+  /* own period state (girlfriend actions) */
 
-  let currentCycle: any = null;
+  const latestOwn =
+    ownPeriods.length > 0
+      ? [...ownPeriods].sort((a, b) =>
+          b.start_date.localeCompare(a.start_date)
+        )[0]
+      : null;
 
-  if (
-    partnerPeriods.length > 0
-  ) {
+  const canEndPeriod =
+    !viewerMode &&
+    !!latestOwn &&
+    !latestOwn.end_date &&
+    latestOwn.start_date <= today;
+
+  const startedToday = ownPeriods.some((p) => p.start_date === today);
+
+  /* logs list */
+
+  const visibleLogs = showAllLogs
+    ? sortedPeriods
+    : sortedPeriods.slice(0, LOGS_PREVIEW_COUNT);
+
+  const hiddenLogsCount = sortedPeriods.length - visibleLogs.length;
+
+  /* hero sizing */
+
+  const circleSize = Math.min(width * 0.72, 340);
+  const ringSize = circleSize + 36;
+  const ringRadius = ringSize / 2;
+
+  const progress = activeInfo.cycleDay
+    ? Math.min(activeInfo.cycleDay / cycleLength, 1)
+    : 0;
+
+  const headAngle = progress * Math.PI * 2;
+  const arcDots = Math.floor(progress * 60);
+
+  const heroLine1 = viewerMode ? activeCopy.partnerLine1 : activeCopy.line1;
+  const heroLine2 = viewerMode ? activeCopy.partnerLine2 : activeCopy.line2;
+
+  /* ============================================================
+     ACTIONS  (girlfriend only)
+     ============================================================ */
+
+  async function refresh() {
+    await loadDashboard();
+  }
+
+  function closeSheet() {
+    setSheet(null);
+    setShowAllLogs(false);
+  }
+
+  async function startPeriodToday() {
+    if (viewerMode) return;
+
+    if (startedToday) {
+      Alert.alert('Already logged', 'Today is already saved as a period start.');
+      return;
+    }
+
     try {
-      currentCycle =
-        getCurrentCycleInfo(
-          partnerPeriods,
-          partnerSettings
-        );
-    } catch (error) {
-      console.error(
-        'CYCLE CALCULATION ERROR:',
-        error
-      );
+      setSaving(true);
+      await createPeriod(today, null, '');
+      await refresh();
+    } catch (error: any) {
+      Alert.alert('Could not save', error?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
     }
   }
 
-  const currentPhase =
-    currentCycle?.phase ??
-    null;
+  async function endPeriodToday() {
+    if (viewerMode || !latestOwn || latestOwn.end_date) return;
 
-  const cycleDay =
-    currentCycle?.cycleDay ??
-    null;
-
-  const cycleLength =
-    currentCycle?.cycleLength ??
-    partnerSettings?.average_cycle_length ??
-    null;
-
-  const nextPeriod =
-    currentCycle?.predictedNextPeriod ??
-    currentCycle?.nextPeriod ??
-    null;
-
-  const latestPeriod =
-    currentCycle?.latestPeriod ??
-    null;
-
-  // ----------------------------------------------------------
-  // IF HELPER DOES NOT RETURN PREDICTED DATE,
-  // CALCULATE A BASIC ESTIMATE FROM THE LATEST PERIOD.
-  // ----------------------------------------------------------
-
-  let estimatedNextPeriod =
-    nextPeriod;
-
-  if (
-    !estimatedNextPeriod &&
-    latestPeriod?.start_date &&
-    cycleLength
-  ) {
-    estimatedNextPeriod =
-      addDays(
-        latestPeriod.start_date,
-        Number(cycleLength)
+    try {
+      setSaving(true);
+      await updatePeriod(
+        latestOwn.id,
+        latestOwn.start_date,
+        today,
+        latestOwn.notes || ''
       );
+      await refresh();
+    } catch (error: any) {
+      Alert.alert('Could not update', error?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
   }
 
-  // ----------------------------------------------------------
-  // CALENDAR
-  // ----------------------------------------------------------
+  function deleteOwnPeriod(period: PeriodLog) {
+    if (viewerMode) return;
 
-  const calendarDays =
-    buildCalendarDays(month);
-
-  const monthTitle =
-    month.toLocaleDateString(
-      undefined,
+    Alert.alert('Delete this period?', 'This removes the period entry.', [
+      { text: 'Cancel', style: 'cancel' },
       {
-        month: 'long',
-        year: 'numeric',
-      }
-    );
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            setSaving(true);
+            await deletePeriod(period.id);
+            await refresh();
+          } catch (error: any) {
+            Alert.alert(
+              'Could not delete',
+              error?.message || 'Please try again.'
+            );
+          } finally {
+            setSaving(false);
+          }
+        },
+      },
+    ]);
+  }
 
-  // ----------------------------------------------------------
-  // PERIOD DATE RANGE
-  // ----------------------------------------------------------
+  async function saveSymptom() {
+    if (viewerMode) return;
 
-  const periodLength =
-    Number(
-      partnerSettings?.average_period_length ??
-        5
-    );
-
-  function isPeriodDate(
-    date: string
-  ) {
-    if (
-      partnerPeriods.length === 0
-    ) {
-      return false;
+    if (!symptomType) {
+      Alert.alert('Pick a symptom', 'Choose a symptom first.');
+      return;
     }
 
-    return partnerPeriods.some(
-      (period: any) => {
-        if (!period?.start_date) {
-          return false;
-        }
+    try {
+      setSaving(true);
 
-        const start =
-          period.start_date;
+      await savePeriodSymptom({
+        symptomDate: today,
+        symptomType,
+        severity,
+        mood,
+      });
 
-        const end =
-          period.end_date ||
-          addDays(
-            start,
-            Math.max(
-              periodLength - 1,
-              0
-            )
-          );
+      setSymptomType(null);
+      setMood(null);
+      setSeverity('mild');
 
-        return (
-          date >= start &&
-          date <= end
-        );
-      }
-    );
-  }
-
-  // ----------------------------------------------------------
-  // ESTIMATED OVULATION
-  // ----------------------------------------------------------
-
-  let estimatedOvulation:
-    string | null = null;
-
-  if (
-    latestPeriod?.start_date &&
-    cycleLength
-  ) {
-    const ovulationOffset =
-      Math.max(
-        Number(cycleLength) - 14,
-        0
+      await refresh();
+    } catch (error: any) {
+      Alert.alert(
+        'Could not save symptom',
+        error?.message || 'Please try again.'
       );
-
-    estimatedOvulation =
-      addDays(
-        latestPeriod.start_date,
-        ovulationOffset
-      );
-  }
-
-  // ----------------------------------------------------------
-  // FERTILE WINDOW
-  // ----------------------------------------------------------
-
-  let fertileStart:
-    string | null = null;
-
-  let fertileEnd:
-    string | null = null;
-
-  if (estimatedOvulation) {
-    fertileStart =
-      addDays(
-        estimatedOvulation,
-        -5
-      );
-
-    fertileEnd =
-      addDays(
-        estimatedOvulation,
-        1
-      );
-  }
-
-  function isFertileDate(
-    date: string
-  ) {
-    if (
-      !fertileStart ||
-      !fertileEnd
-    ) {
-      return false;
+    } finally {
+      setSaving(false);
     }
+  }
 
+  async function removeSymptom(id: string) {
+    if (viewerMode) return;
+
+    try {
+      setSaving(true);
+      await deletePeriodSymptom(id);
+      await refresh();
+    } catch (error: any) {
+      Alert.alert(
+        'Could not delete symptom',
+        error?.message || 'Please try again.'
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function openRoute(route: string) {
+    try {
+      router.push(route as any);
+    } catch (error) {
+      console.error('PERIOD ROUTE:', error);
+    }
+  }
+
+  /* ============================================================
+     LOADING / ERROR
+     ============================================================ */
+
+  if (!ready || loading) {
     return (
-      date >= fertileStart &&
-      date <= fertileEnd
-    );
-  }
-
-  function isOvulationDate(
-    date: string
-  ) {
-    return (
-      estimatedOvulation ===
-      date
-    );
-  }
-
-  // ----------------------------------------------------------
-  // TODAY'S SHARED SYMPTOMS
-  // ----------------------------------------------------------
-
-  const todaySymptoms =
-    partnerSymptoms.filter(
-      (symptom: any) =>
-        symptom?.symptom_date ===
-        today
-    );
-
-  // ==========================================================
-  // MONTH NAVIGATION
-  // ==========================================================
-
-  function previousMonth() {
-    setMonth(
-      current => {
-        const next =
-          new Date(current);
-
-        next.setMonth(
-          next.getMonth() - 1
-        );
-
-        return next;
-      }
-    );
-  }
-
-  function nextMonth() {
-    setMonth(
-      current => {
-        const next =
-          new Date(current);
-
-        next.setMonth(
-          next.getMonth() + 1
-        );
-
-        return next;
-      }
-    );
-  }
-
-  // ==========================================================
-  // LOADING
-  // ==========================================================
-
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator
-          size="small"
-          color={COLORS.pink}
-        />
-
-        <Text
-          style={styles.loadingText}
-        >
-          Loading her cycle...
-        </Text>
-      </View>
-    );
-  }
-
-  // ==========================================================
-  // ACCOUNT ERROR
-  // ==========================================================
-
-  if (!account) {
-    return (
-      <View style={styles.center}>
-        <View
-          style={styles.errorIcon}
-        >
-          <Feather
-            name="alert-circle"
-            size={24}
-            color={COLORS.danger}
-          />
+      <Screen>
+        <View style={styles.loading}>
+          <ActivityIndicator color={PINK} size="small" />
         </View>
+      </Screen>
+    );
+  }
 
-        <Text
-          style={styles.errorTitle}
-        >
-          Unable to load account
-        </Text>
+  if (!dashboard) {
+    return (
+      <Screen>
+        <View style={styles.emptyScreen}>
+          <View style={styles.emptyIcon}>
+            <Ionicons name="calendar-outline" size={28} color={PINK} />
+          </View>
 
-        <Text
-          style={styles.errorText}
-        >
-          {errorMessage ||
-            'Please try again.'}
-        </Text>
-
-        <Pressable
-          onPress={load}
-          style={styles.primaryButton}
-        >
-          <Text
-            style={
-              styles.primaryButtonText
-            }
-          >
-            Try again
+          <Text style={styles.emptyScreenTitle}>
+            {viewerMode ? 'Her cycle' : 'Your cycle'}
           </Text>
-        </Pressable>
-      </View>
+
+          <Text style={styles.emptyScreenText}>
+            Something went wrong while loading. Please check your connection and
+            try again.
+          </Text>
+
+          <Pressable onPress={refresh} style={styles.retryButton}>
+            <Text style={styles.retryText}>Try again</Text>
+          </Pressable>
+        </View>
+      </Screen>
     );
   }
 
-  // ==========================================================
-  // PRIVATE
-  // ==========================================================
-
-  if (
-    visibility === 'private'
-  ) {
-    return (
-      <View
-        style={styles.screen}
-      >
-        <ScrollView
-          showsVerticalScrollIndicator={
-            false
-          }
-          contentContainerStyle={
-            styles.container
-          }
-        >
-          <View
-            style={styles.header}
-          >
-            <Pressable
-              onPress={() =>
-                router.back()
-              }
-              style={
-                styles.headerButton
-              }
-            >
-              <Feather
-                name="chevron-left"
-                size={22}
-                color={
-                  COLORS.charcoal
-                }
-              />
-            </Pressable>
-
-            <View
-              style={
-                styles.headerCenter
-              }
-            >
-              <Text
-                style={
-                  styles.headerEyebrow
-                }
-              >
-                HER CYCLE
-              </Text>
-
-              <Text
-                style={
-                  styles.headerTitle
-                }
-              >
-                Period Cycle
-              </Text>
-            </View>
-
-            <View
-              style={
-                styles.headerButtonPlaceholder
-              }
-            />
-          </View>
-
-          <View
-            style={styles.privateCard}
-          >
-            <View
-              style={
-                styles.privateIcon
-              }
-            >
-              <Feather
-                name="lock"
-                size={22}
-                color={
-                  COLORS.pink
-                }
-              />
-            </View>
-
-            <Text
-              style={
-                styles.privateTitle
-              }
-            >
-              Her cycle is private
-            </Text>
-
-            <Text
-              style={
-                styles.privateText
-              }
-            >
-              {girlfriendName} has chosen
-              not to share her period
-              information with you.
-            </Text>
-
-            <View
-              style={
-                styles.privateDivider
-              }
-            />
-
-            <Text
-              style={
-                styles.privateHint
-              }
-            >
-              She can change this anytime
-              from her Period Tracker privacy
-              settings.
-            </Text>
-          </View>
-        </ScrollView>
-      </View>
-    );
-  }
-
-  // ==========================================================
-  // NO PARTNER DATA
-  // ==========================================================
-
-  if (
-    !partnerSettings &&
-    partnerPeriods.length === 0
-  ) {
-    return (
-      <View
-        style={styles.screen}
-      >
-        <ScrollView
-          showsVerticalScrollIndicator={
-            false
-          }
-          contentContainerStyle={
-            styles.container
-          }
-        >
-          <View
-            style={styles.header}
-          >
-            <Pressable
-              onPress={() =>
-                router.back()
-              }
-              style={
-                styles.headerButton
-              }
-            >
-              <Feather
-                name="chevron-left"
-                size={22}
-                color={
-                  COLORS.charcoal
-                }
-              />
-            </Pressable>
-
-            <View
-              style={
-                styles.headerCenter
-              }
-            >
-              <Text
-                style={
-                  styles.headerEyebrow
-                }
-              >
-                HER CYCLE
-              </Text>
-
-              <Text
-                style={
-                  styles.headerTitle
-                }
-              >
-                Period Cycle
-              </Text>
-            </View>
-
-            <View
-              style={
-                styles.headerButtonPlaceholder
-              }
-            />
-          </View>
-
-          <View
-            style={styles.emptyCard}
-          >
-            <View
-              style={
-                styles.emptyIcon
-              }
-            >
-              <Feather
-                name="calendar"
-                size={25}
-                color={
-                  COLORS.blue
-                }
-              />
-            </View>
-
-            <Text
-              style={
-                styles.emptyTitle
-              }
-            >
-              Cycle information isn't
-              available yet
-            </Text>
-
-            <Text
-              style={
-                styles.emptyText
-              }
-            >
-              Once her period tracker has
-              been set up and shared with you,
-              her cycle information will appear
-              here.
-            </Text>
-          </View>
-        </ScrollView>
-      </View>
-    );
-  }
-
-  // ==========================================================
-  // MAIN SCREEN
-  // ==========================================================
+  /* ============================================================
+     RENDER
+     ============================================================ */
 
   return (
-    <View
-      style={styles.screen}
-    >
-      <ScrollView
-        showsVerticalScrollIndicator={
-          false
-        }
-        contentContainerStyle={
-          styles.container
-        }
-      >
-        {/* HEADER */}
-
-        <View
-          style={styles.header}
-        >
-          <Pressable
-            onPress={() =>
-              router.back()
-            }
-            style={
-              styles.headerButton
-            }
-          >
-            <Feather
-              name="chevron-left"
-              size={22}
-              color={
-                COLORS.charcoal
-              }
-            />
-          </Pressable>
-
-          <View
-            style={
-              styles.headerCenter
-            }
-          >
-            <Text
-              style={
-                styles.headerEyebrow
-              }
-            >
-              HER CYCLE
-            </Text>
-
-            <Text
-              style={
-                styles.headerTitle
-              }
-            >
-              Period Cycle
-            </Text>
-          </View>
-
-          <View
-            style={
-              styles.headerButtonPlaceholder
-            }
-          />
-        </View>
-
-        {/* INTRO */}
-
-        <View
-          style={styles.intro}
-        >
-          <Text
-            style={styles.introTitle}
-          >
-            {girlfriendName}'s cycle
-          </Text>
-
-          <Text
-            style={
-              styles.introSubtitle
-            }
-          >
-            A private, read-only estimate
-            based on the cycle information
-            she has chosen to share.
-          </Text>
-        </View>
-
-        {/* CURRENT PHASE */}
-
-        <View
-          style={[
-            styles.phaseCard,
-            {
-              backgroundColor:
-                phaseBackground(
-                  currentPhase
-                ),
-            },
+    <Screen>
+      <View style={styles.root}>
+        <ScrollView
+          ref={scrollRef}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.container,
+            { paddingBottom: 120 + insets.bottom },
           ]}
         >
-          <View
-            style={
-              styles.phaseTopRow
-            }
-          >
-            <View
-              style={[
-                styles.phaseIconCircle,
-                {
-                  backgroundColor:
-                    COLORS.white,
-                },
-              ]}
-            >
-              <Feather
-                name={
-                  phaseIcon(
-                    currentPhase
-                  ) as any
-                }
-                size={22}
-                color={
-                  phaseColor(
-                    currentPhase
-                  )
-                }
-              />
-            </View>
+          {/* HEADER */}
+          <FadeIn style={styles.header}>
+            <View style={styles.headerLeft}>
+              {router.canGoBack?.() ? (
+                <View style={styles.backWrap}>
+                  <IconButton name="arrow-back" onPress={() => router.back()} />
+                </View>
+              ) : null}
 
-            <View
-              style={
-                styles.estimatePill
-              }
-            >
-              <Text
-                style={
-                  styles.estimateText
-                }
-              >
-                ESTIMATED
-              </Text>
-            </View>
-          </View>
-
-          <Text
-            style={
-              styles.phaseLabel
-            }
-          >
-            CURRENT PHASE
-          </Text>
-
-          <Text
-            style={[
-              styles.phaseTitle,
-              {
-                color:
-                  phaseColor(
-                    currentPhase
-                  ),
-              },
-            ]}
-          >
-            {currentPhase ||
-              'Cycle phase'}
-          </Text>
-
-          <Text
-            style={
-              styles.phaseDescription
-            }
-          >
-            {phaseDescription(
-              currentPhase
-            )}
-          </Text>
-
-          <View
-            style={
-              styles.phaseStats
-            }
-          >
-            <View
-              style={
-                styles.phaseStat
-              }
-            >
-              <Text
-                style={
-                  styles.phaseStatValue
-                }
-              >
-                {cycleDay
-                  ? `Day ${cycleDay}`
-                  : '—'}
-              </Text>
-
-              <Text
-                style={
-                  styles.phaseStatLabel
-                }
-              >
-                Cycle day
-              </Text>
-            </View>
-
-            <View
-              style={
-                styles.statDivider
-              }
-            />
-
-            <View
-              style={
-                styles.phaseStat
-              }
-            >
-              <Text
-                style={
-                  styles.phaseStatValue
-                }
-              >
-                {cycleLength
-                  ? `${cycleLength}d`
-                  : '—'}
-              </Text>
-
-              <Text
-                style={
-                  styles.phaseStatLabel
-                }
-              >
-                Avg. cycle
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* NEXT PERIOD */}
-
-        <View
-          style={styles.nextCard}
-        >
-          <View
-            style={
-              styles.nextIconCircle
-            }
-          >
-            <Feather
-              name="calendar"
-              size={20}
-              color={
-                COLORS.pink
-              }
-            />
-          </View>
-
-          <View
-            style={
-              styles.nextContent
-            }
-          >
-            <Text
-              style={
-                styles.cardEyebrow
-              }
-            >
-              ESTIMATED NEXT PERIOD
-            </Text>
-
-            <Text
-              style={
-                styles.nextDate
-              }
-            >
-              {formatDate(
-                estimatedNextPeriod
-              )}
-            </Text>
-
-            {estimatedNextPeriod && (
-              <Text
-                style={
-                  styles.nextHint
-                }
-              >
-                This is an estimate and may
-                shift as more cycle history is
-                recorded.
-              </Text>
-            )}
-          </View>
-        </View>
-
-        {/* CALENDAR */}
-
-        <View
-          style={styles.section}
-        >
-          <View
-            style={
-              styles.sectionHeader
-            }
-          >
-            <View>
-              <Text
-                style={
-                  styles.sectionEyebrow
-                }
-              >
-                CYCLE CALENDAR
-              </Text>
-
-              <Text
-                style={
-                  styles.sectionTitle
-                }
-              >
-                {monthTitle}
-              </Text>
-            </View>
-
-            <View
-              style={
-                styles.monthButtons
-              }
-            >
-              <Pressable
-                onPress={
-                  previousMonth
-                }
-                style={
-                  styles.monthButton
-                }
-              >
-                <Feather
-                  name="chevron-left"
-                  size={18}
-                  color={
-                    COLORS.charcoal
-                  }
-                />
-              </Pressable>
-
-              <Pressable
-                onPress={
-                  nextMonth
-                }
-                style={
-                  styles.monthButton
-                }
-              >
-                <Feather
-                  name="chevron-right"
-                  size={18}
-                  color={
-                    COLORS.charcoal
-                  }
-                />
-              </Pressable>
-            </View>
-          </View>
-
-          <View
-            style={styles.calendarCard}
-          >
-            <View
-              style={
-                styles.weekHeader
-              }
-            >
-              {[
-                'S',
-                'M',
-                'T',
-                'W',
-                'T',
-                'F',
-                'S',
-              ].map(
-                (
-                  day,
-                  index
-                ) => (
-                  <Text
-                    key={`${day}-${index}`}
-                    style={
-                      styles.weekDay
-                    }
-                  >
-                    {day}
-                  </Text>
-                )
-              )}
-            </View>
-
-            <View
-              style={
-                styles.calendarGrid
-              }
-            >
-              {calendarDays.map(
-                (item) => {
-                  const period =
-                    isPeriodDate(
-                      item.date
-                    );
-
-                  const ovulation =
-                    isOvulationDate(
-                      item.date
-                    );
-
-                  const fertile =
-                    isFertileDate(
-                      item.date
-                    );
-
-                  const isToday =
-                    item.date ===
-                    today;
-
-                  return (
-                    <View
-                      key={
-                        item.date
-                      }
-                      style={
-                        styles.dayCell
-                      }
-                    >
-                      <View
-                        style={[
-                          styles.dayCircle,
-                          !item.currentMonth &&
-                            styles.dayOutside,
-                          period &&
-                            styles.dayPeriod,
-                          fertile &&
-                            !period &&
-                            styles.dayFertile,
-                          ovulation &&
-                            styles.dayOvulation,
-                          isToday &&
-                            styles.dayToday,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.dayText,
-                            !item.currentMonth &&
-                              styles.dayOutsideText,
-                            period &&
-                              styles.dayPeriodText,
-                            ovulation &&
-                              styles.dayOvulationText,
-                            isToday &&
-                              styles.dayTodayText,
-                          ]}
-                        >
-                          {
-                            item.day
-                          }
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                }
-              )}
-            </View>
-
-            <View
-              style={
-                styles.legend
-              }
-            >
-              <View
-                style={
-                  styles.legendItem
-                }
-              >
-                <View
-                  style={[
-                    styles.legendDot,
-                    {
-                      backgroundColor:
-                        COLORS.pink,
-                    },
-                  ]}
-                />
-
-                <Text
-                  style={
-                    styles.legendText
-                  }
-                >
-                  Period
-                </Text>
-              </View>
-
-              <View
-                style={
-                  styles.legendItem
-                }
-              >
-                <View
-                  style={[
-                    styles.legendDot,
-                    {
-                      backgroundColor:
-                        COLORS.blue,
-                    },
-                  ]}
-                />
-
-                <Text
-                  style={
-                    styles.legendText
-                  }
-                >
-                  Fertile
-                </Text>
-              </View>
-
-              <View
-                style={
-                  styles.legendItem
-                }
-              >
-                <View
-                  style={[
-                    styles.legendDot,
-                    {
-                      backgroundColor:
-                        COLORS.lavender,
-                    },
-                  ]}
-                />
-
-                <Text
-                  style={
-                    styles.legendText
-                  }
-                >
-                  Ovulation
-                </Text>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        {/* CYCLE DETAILS */}
-
-        <View
-          style={styles.section}
-        >
-          <Text
-            style={
-              styles.sectionEyebrow
-            }
-          >
-            CYCLE DETAILS
-          </Text>
-
-          <Text
-            style={
-              styles.sectionTitle
-            }
-          >
-            What the estimate is based on
-          </Text>
-
-          <View
-            style={
-              styles.detailsCard
-            }
-          >
-            <View
-              style={
-                styles.detailRow
-              }
-            >
-              <View
-                style={
-                  styles.detailIcon
-                }
-              >
-                <Feather
-                  name="repeat"
-                  size={17}
-                  color={
-                    COLORS.blue
-                  }
-                />
-              </View>
-
-              <View
-                style={
-                  styles.detailContent
-                }
-              >
-                <Text
-                  style={
-                    styles.detailLabel
-                  }
-                >
-                  Average cycle length
-                </Text>
-
-                <Text
-                  style={
-                    styles.detailValue
-                  }
-                >
-                  {cycleLength
-                    ? `${cycleLength} days`
-                    : 'Not available'}
-                </Text>
-              </View>
-            </View>
-
-            <View
-              style={
-                styles.detailDivider
-              }
-            />
-
-            <View
-              style={
-                styles.detailRow
-              }
-            >
-              <View
-                style={
-                  styles.detailIcon
-                }
-              >
-                <Feather
-                  name="calendar"
-                  size={17}
-                  color={
-                    COLORS.pink
-                  }
-                />
-              </View>
-
-              <View
-                style={
-                  styles.detailContent
-                }
-              >
-                <Text
-                  style={
-                    styles.detailLabel
-                  }
-                >
-                  Latest recorded period
-                </Text>
-
-                <Text
-                  style={
-                    styles.detailValue
-                  }
-                >
-                  {formatDate(
-                    latestPeriod?.start_date
-                  )}
-                </Text>
-              </View>
-            </View>
-
-            <View
-              style={
-                styles.detailDivider
-              }
-            />
-
-            <View
-              style={
-                styles.detailRow
-              }
-            >
-              <View
-                style={
-                  styles.detailIcon
-                }
-              >
-                <Feather
-                  name="sun"
-                  size={17}
-                  color={
-                    COLORS.orange
-                  }
-                />
-              </View>
-
-              <View
-                style={
-                  styles.detailContent
-                }
-              >
-                <Text
-                  style={
-                    styles.detailLabel
-                  }
-                >
-                  Estimated ovulation
-                </Text>
-
-                <Text
-                  style={
-                    styles.detailValue
-                  }
-                >
-                  {formatDate(
-                    estimatedOvulation
-                  )}
-                </Text>
-              </View>
-            </View>
-
-            <View
-              style={
-                styles.detailDivider
-              }
-            />
-
-            <View
-              style={
-                styles.detailRow
-              }
-            >
-              <View
-                style={
-                  styles.detailIcon
-                }
-              >
-                <Feather
-                  name="activity"
-                  size={17}
-                  color={
-                    COLORS.lavender
-                  }
-                />
-              </View>
-
-              <View
-                style={
-                  styles.detailContent
-                }
-              >
-                <Text
-                  style={
-                    styles.detailLabel
-                  }
-                >
-                  Period length
-                </Text>
-
-                <Text
-                  style={
-                    styles.detailValue
-                  }
-                >
-                  {periodLength} days
-                </Text>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        {/* SHARED SYMPTOMS */}
-
-        {visibility ===
-          'full' && (
-          <View
-            style={styles.section}
-          >
-            <View
-              style={
-                styles.sectionHeader
-              }
-            >
               <View>
-                <Text
-                  style={
-                    styles.sectionEyebrow
-                  }
-                >
-                  SHARED TODAY
-                </Text>
+                <View style={styles.titleRow}>
+                  <Text style={styles.headerTitle}>
+                    {viewerMode ? 'Her cycle' : 'Your cycle'}
+                  </Text>
+                  <Ionicons
+                    name="heart"
+                    size={17}
+                    color={PINK}
+                    style={{ marginLeft: 8 }}
+                  />
+                </View>
 
-                <Text
-                  style={
-                    styles.sectionTitle
-                  }
-                >
-                  Symptoms
-                </Text>
-              </View>
-
-              <View
-                style={
-                  styles.countPill
-                }
-              >
-                <Text
-                  style={
-                    styles.countPillText
-                  }
-                >
-                  {
-                    todaySymptoms.length
-                  }
+                <Text style={styles.headerSubtitle}>
+                  {viewerMode
+                    ? 'Shared with you, with love.'
+                    : 'Small steps, big care.'}
                 </Text>
               </View>
             </View>
+          </FadeIn>
 
-            {todaySymptoms.length >
-            0 ? (
-              <View
-                style={
-                  styles.symptomsCard
-                }
-              >
-                {todaySymptoms.map(
-                  (
-                    symptom: any,
-                    index: number
-                  ) => (
-                    <View
-                      key={
-                        symptom.id ||
-                        `${symptom.symptom_type}-${index}`
-                      }
+          {/* DATE STRIP */}
+          <FadeIn delay={50} style={styles.strip}>
+            {stripDates.map((date) => {
+              const active = date === activeDate;
+              const info = getCycleInfoForDate(periods, settings, date);
+
+              const number =
+                hasCycleData && info.cycleDay
+                  ? String(info.cycleDay)
+                  : String(parseDate(date).getDate());
+
+              const weekday = parseDate(date).toLocaleDateString(undefined, {
+                weekday: 'short',
+              });
+
+              return (
+                <Pressable
+                  key={date}
+                  onPress={() => setSelectedDate(date)}
+                  style={styles.stripItem}
+                >
+                  <View
+                    style={[styles.stripPill, active && styles.stripPillActive]}
+                  >
+                    <Text
                       style={[
-                        styles.symptomRow,
-                        index <
-                          todaySymptoms.length -
-                            1 &&
-                          styles.symptomRowBorder,
+                        styles.stripNumber,
+                        active && styles.stripTextActive,
                       ]}
                     >
-                      <View
-                        style={
-                          styles.symptomIcon
-                        }
-                      >
-                        <Feather
-                          name="heart"
-                          size={16}
-                          color={
-                            COLORS.pink
-                          }
-                        />
-                      </View>
+                      {number}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.stripWeekday,
+                        active && styles.stripTextActive,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {weekday}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </FadeIn>
 
-                      <View
-                        style={
-                          styles.symptomContent
-                        }
-                      >
-                        <Text
-                          style={
-                            styles.symptomName
-                          }
-                        >
-                          {
-                            symptom.symptom_type
-                          }
-                        </Text>
-
-                        <Text
-                          style={
-                            styles.symptomSeverity
-                          }
-                        >
-                          {
-                            symptom.severity ||
-                            'Logged'
-                          }
-                        </Text>
-                      </View>
-                    </View>
-                  )
-                )}
-              </View>
-            ) : (
+          {/* HERO */}
+          <FadeIn delay={90}>
+            <View
+              style={[styles.heroWrap, { width: ringSize, height: ringSize }]}
+            >
               <View
-                style={
-                  styles.noSymptomsCard
-                }
-              >
-                <Feather
-                  name="check-circle"
-                  size={20}
-                  color={
-                    COLORS.green
-                  }
+                style={[
+                  styles.ring,
+                  {
+                    width: ringSize,
+                    height: ringSize,
+                    borderRadius: ringRadius,
+                  },
+                ]}
+              />
+
+              {Array.from({ length: arcDots }, (_, index) => {
+                const angle = (index / 60) * Math.PI * 2;
+                return (
+                  <View
+                    key={`dot-${index}`}
+                    style={[
+                      styles.arcDot,
+                      {
+                        backgroundColor: activeCopy.accent,
+                        left: ringRadius + ringRadius * Math.sin(angle) - 1.5,
+                        top: ringRadius - ringRadius * Math.cos(angle) - 1.5,
+                      },
+                    ]}
+                  />
+                );
+              })}
+
+              {hasCycleData ? (
+                <View
+                  style={[
+                    styles.headDot,
+                    {
+                      backgroundColor: activeCopy.accent,
+                      left: ringRadius + ringRadius * Math.sin(headAngle) - 7,
+                      top: ringRadius - ringRadius * Math.cos(headAngle) - 7,
+                    },
+                  ]}
                 />
+              ) : null}
 
-                <Text
-                  style={
-                    styles.noSymptomsText
-                  }
+              <View
+                style={[
+                  styles.circleShadow,
+                  {
+                    width: circleSize,
+                    height: circleSize,
+                    borderRadius: circleSize / 2,
+                  },
+                ]}
+              >
+                <View
+                  style={[styles.circleClip, { borderRadius: circleSize / 2 }]}
                 >
-                  No shared symptoms
-                  recorded today.
-                </Text>
+                  <Image
+                    source={phaseImage}
+                    style={styles.circleImage}
+                    resizeMode="cover"
+                  />
+                </View>
               </View>
-            )}
-          </View>
-        )}
+            </View>
 
-        {/* PRIVACY NOTE */}
+            {/* Phase text lives in the blank space below the circle */}
+            <View style={styles.heroTextBlock}>
+              <View
+                style={[
+                  styles.heroIconHalo,
+                  { backgroundColor: `${activeCopy.accent}26` },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.heroIcon,
+                    { backgroundColor: activeCopy.accent },
+                  ]}
+                >
+                  <Ionicons
+                    name={hasCycleData ? activeCopy.icon : 'water'}
+                    size={22}
+                    color="#FFFFFF"
+                  />
+                </View>
+              </View>
 
+              <Text style={[styles.heroLabel, { color: activeCopy.accent }]}>
+                {viewerMode ? 'SHARED CYCLE PHASE' : 'MENSTRUAL CYCLE PHASE'}
+              </Text>
+
+              <Text
+                style={styles.heroTitle}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
+                {hasCycleData ? activeCopy.title : 'No cycle yet'}
+              </Text>
+
+              <Text style={styles.heroDay}>
+                {hasCycleData && activeInfo.cycleDay
+                  ? `Day ${activeInfo.cycleDay} of ${cycleLength}`
+                  : hasCycleData
+                  ? 'Upcoming cycle'
+                  : 'Nothing logged yet'}
+              </Text>
+
+              <Text style={styles.heroDescription}>
+                {hasCycleData
+                  ? `${heroLine1}\n${heroLine2}`
+                  : viewerMode
+                  ? 'Once she logs her period,\nit will show up here.'
+                  : 'Log your first period to begin.'}
+              </Text>
+            </View>
+          </FadeIn>
+
+          {/* QUICK ACCESS  (swipe sideways) */}
+          <FadeIn delay={140}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.quickScroll}
+              contentContainerStyle={styles.quickContent}
+            >
+              <FeatureTile
+                width={128}
+                icon="calendar"
+                iconColor={PEACH}
+                background={PEACH_SOFT}
+                border="#F7DAD2"
+                title="Calendar"
+                description="Cycle dates and predictions."
+                onPress={() => setSheet('calendar')}
+              />
+              <FeatureTile
+                width={128}
+                icon="happy"
+                iconColor={PURPLE}
+                background={PURPLE_SOFT}
+                border="#E1D9F5"
+                title="Symptoms"
+                description={
+                  viewerMode ? "How she's feeling." : 'Track how you feel.'
+                }
+                onPress={() => setSheet('symptoms')}
+              />
+              <FeatureTile
+                width={128}
+                icon="water"
+                iconColor={PINK}
+                background={PINK_SOFT}
+                border={PINK_BORDER}
+                title="Period Logs"
+                description={
+                  viewerMode ? 'Her period history.' : 'Your period history.'
+                }
+                onPress={() => setSheet('logs')}
+              />
+              <FeatureTile
+                width={128}
+                icon="bar-chart"
+                iconColor={BLUE}
+                background={BLUE_SOFT}
+                border="#D8E2F5"
+                title="Insights"
+                description="Patterns and trends."
+                onPress={() => openRoute(ROUTES.insights)}
+              />
+            </ScrollView>
+          </FadeIn>
+
+          {/* TODAY */}
+          <FadeIn delay={190}>
+            <View style={styles.todayHeader}>
+              <Text style={styles.todayTitle}>Today</Text>
+              <View style={styles.todayDot} />
+              <Text style={styles.todayUpdates}>
+                {todaySymptoms.length > 0
+                  ? `${viewerMode ? 'She has' : 'You have'} ${
+                      todaySymptoms.length
+                    } update${todaySymptoms.length === 1 ? '' : 's'}`
+                  : 'Nothing new yet'}
+              </Text>
+            </View>
+
+            <View style={styles.todayRow}>
+              <PressScale
+                onPress={() => setSheet('logs')}
+                scaleTo={0.97}
+                style={styles.todayCard}
+                contentStyle={styles.todayCardContent}
+              >
+                <View style={[styles.todayIcon, { backgroundColor: PINK }]}>
+                  <Ionicons name="water-outline" size={17} color="#FFFFFF" />
+                </View>
+                <View style={styles.todayText}>
+                  <Text style={styles.todayCardTitle} numberOfLines={1}>
+                    Period
+                  </Text>
+                  <Text style={styles.todayCardSub} numberOfLines={1}>
+                    {hasCycleData && cycleInfo.cycleDay
+                      ? `Day ${cycleInfo.cycleDay} • ${displayPeriodLength} days`
+                      : 'No period data'}
+                  </Text>
+                </View>
+              </PressScale>
+
+              <PressScale
+                onPress={() => setSheet('symptoms')}
+                scaleTo={0.97}
+                style={styles.todayCardPurple}
+                contentStyle={styles.todayCardContent}
+              >
+                <View style={[styles.todayIcon, { backgroundColor: PURPLE }]}>
+                  <Ionicons name="happy-outline" size={17} color="#FFFFFF" />
+                </View>
+                <View style={styles.todayText}>
+                  <Text style={styles.todayCardTitle} numberOfLines={1}>
+                    Symptoms
+                  </Text>
+                  <Text style={styles.todayCardSub} numberOfLines={1}>
+                    {todaySymptoms.length > 0
+                      ? todaySymptoms.map((i) => i.symptom_type).join(', ')
+                      : viewerMode
+                      ? 'Nothing shared today'
+                      : 'Track how you feel'}
+                  </Text>
+                </View>
+              </PressScale>
+            </View>
+
+            <View style={styles.infoRow}>
+              <InfoCard
+                icon="calendar-outline"
+                label="Next expected"
+                value={formatReadableDate(predictedNext)}
+              />
+              <InfoCard
+                icon="repeat-outline"
+                label="Cycle length"
+                value={`${cycleLength} days`}
+              />
+              <InfoCard
+                icon="water-outline"
+                label="Period length"
+                value={`${periodLength} days`}
+              />
+            </View>
+          </FadeIn>
+
+          {/* WANT / UNSAID / LITTLE THINGS */}
+          <FadeIn delay={240}>
+            <View style={styles.tileRow}>
+              <FeatureTile
+                icon="heart"
+                iconColor={PINK}
+                background={PINK_SOFT}
+                border={PINK_BORDER}
+                title="Want"
+                description={
+                  viewerMode
+                    ? "See what she'd love."
+                    : "Tell him what you'd love."
+                }
+                onPress={() => openRoute(ROUTES.want)}
+              />
+              <FeatureTile
+                icon="chatbubble-ellipses"
+                iconColor={PURPLE}
+                background={PURPLE_SOFT}
+                border="#E1D9F5"
+                title="Unsaid"
+                description={
+                  viewerMode
+                    ? "Things she can't say directly."
+                    : "Things you can't say directly."
+                }
+                onPress={() => openRoute(ROUTES.unsaid)}
+              />
+              <FeatureTile
+                icon="star"
+                iconColor={GOLD}
+                background={GOLD_SOFT}
+                border="#F3E2B8"
+                title="Little Things"
+                description="Small moments that matter."
+                onPress={() => openRoute(ROUTES.littleThings)}
+              />
+            </View>
+          </FadeIn>
+
+          {/* SHARING NOTE (girlfriend only, no toggle) */}
+          {!viewerMode ? (
+            <FadeIn delay={290}>
+              <View style={[styles.card, styles.noteCard]}>
+                <View style={styles.noteIcon}>
+                  <Ionicons name="heart-outline" size={20} color={PINK} />
+                </View>
+                <View style={styles.noteText}>
+                  <Text style={styles.noteTitle}>Shared with your partner</Text>
+                  <Text style={styles.noteDescription}>
+                    Your cycle, symptoms and history are visible to your partner
+                    so he can take care of you better.
+                  </Text>
+                </View>
+              </View>
+            </FadeIn>
+          ) : null}
+        </ScrollView>
+
+        {/* BOTTOM NAV */}
         <View
-          style={
-            styles.estimateNote
-          }
+          style={[
+            styles.tabBar,
+            { paddingBottom: Math.max(insets.bottom, 14) + 4 },
+          ]}
         >
-          <Feather
-            name="info"
-            size={17}
-            color={
-              COLORS.blue
-            }
+          <TabItem
+            label="Home"
+            icon="home-outline"
+            activeIcon="home"
+            active
+            onPress={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
           />
-
-          <Text
-            style={
-              styles.estimateNoteText
-            }
-          >
-            Cycle phases, fertile windows,
-            ovulation and next-period dates
-            are estimates. They can change as
-            more period history is recorded.
-          </Text>
+          <TabItem
+            label="Calendar"
+            icon="calendar-outline"
+            activeIcon="calendar"
+            onPress={() => setSheet('calendar')}
+          />
+          <TabItem
+            label="Insights"
+            icon="bar-chart-outline"
+            activeIcon="bar-chart"
+            onPress={() => openRoute(ROUTES.insights)}
+          />
         </View>
 
-        <View
-          style={
-            styles.bottomSpace
+        {/* ======================================================
+            CALENDAR SHEET
+            ====================================================== */}
+        <Sheet
+          visible={sheet === 'calendar'}
+          title="Calendar"
+          subtitle={viewerMode ? 'Her cycle at a glance' : 'Your cycle at a glance'}
+          bottomInset={insets.bottom}
+          onClose={closeSheet}
+        >
+          <View style={styles.calendarHeader}>
+            <Pressable
+              onPress={() =>
+                setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))
+              }
+              style={styles.arrowButton}
+            >
+              <Ionicons name="chevron-back" size={18} color={TEXT} />
+            </Pressable>
+
+            <Text style={styles.monthTitle}>{getMonthTitle(month)}</Text>
+
+            <Pressable
+              onPress={() =>
+                setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))
+              }
+              style={styles.arrowButton}
+            >
+              <Ionicons name="chevron-forward" size={18} color={TEXT} />
+            </Pressable>
+          </View>
+
+          <View style={styles.weekRow}>
+            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
+              <Text key={`${day}-${index}`} style={styles.weekText}>
+                {day}
+              </Text>
+            ))}
+          </View>
+
+          <View style={styles.calendarGrid}>
+            {calendarDays.map((day, index) => {
+              if (day === null) {
+                return <View key={`empty-${index}`} style={styles.dayCell} />;
+              }
+
+              const dateString = formatCalendarDate(month, day);
+              const isPeriod = periods.some((period) =>
+                isDateInPeriod(dateString, period, periodLength)
+              );
+              const isToday = dateString === today;
+
+              return (
+                <View key={dateString} style={styles.dayCell}>
+                  <View
+                    style={[
+                      styles.dayCircle,
+                      isPeriod && styles.periodDay,
+                      isToday && styles.todayDay,
+                    ]}
+                  >
+                    <Text
+                      style={[styles.dayText, isPeriod && styles.periodDayText]}
+                    >
+                      {day}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+
+          <View style={styles.legend}>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, styles.periodLegend]} />
+              <Text style={styles.legendText}>Period</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, styles.todayLegend]} />
+              <Text style={styles.legendText}>Today</Text>
+            </View>
+          </View>
+        </Sheet>
+
+        {/* ======================================================
+            SYMPTOMS SHEET  (girlfriend edits, boyfriend views)
+            ====================================================== */}
+        <Sheet
+          visible={sheet === 'symptoms'}
+          title="Symptoms"
+          subtitle={
+            viewerMode ? 'What she logged today' : 'How are you feeling today?'
           }
-        />
-      </ScrollView>
+          busy={saving}
+          bottomInset={insets.bottom}
+          onClose={closeSheet}
+        >
+          {viewerMode ? (
+            todaySymptoms.length > 0 ? (
+              <View style={[styles.card, styles.listCard]}>
+                {todaySymptoms.map((item, index) => (
+                  <View
+                    key={item.id || `${item.symptom_type}-${index}`}
+                    style={[
+                      styles.symptomRow,
+                      index < todaySymptoms.length - 1 && styles.symptomBorder,
+                    ]}
+                  >
+                    <View style={styles.symptomDot} />
+                    <Text style={styles.symptomName}>{item.symptom_type}</Text>
+                    <Text style={styles.symptomMeta}>
+                      {capitalize(item.severity) || 'Logged'}
+                      {item.mood ? ` • ${item.mood}` : ''}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={[styles.card, styles.emptyCard]}>
+                <Ionicons name="happy-outline" size={25} color={FAINT} />
+                <Text style={styles.emptyTitle}>Nothing shared today</Text>
+                <Text style={styles.emptyText}>
+                  When she logs how she feels, it will show up here.
+                </Text>
+              </View>
+            )
+          ) : (
+            <>
+              {todaySymptoms.length > 0 ? (
+                <View style={styles.loggedBlock}>
+                  <Text style={[styles.sheetLabel, { marginTop: 0 }]}>
+                    Logged today
+                  </Text>
+
+                  {todaySymptoms.map((item) => (
+                    <View key={item.id} style={styles.loggedRow}>
+                      <Text style={styles.loggedText}>
+                        {item.symptom_type} • {capitalize(item.severity)}
+                        {item.mood ? ` • ${item.mood}` : ''}
+                      </Text>
+
+                      <Pressable
+                        onPress={() => removeSymptom(item.id)}
+                        hitSlop={10}
+                      >
+                        <Ionicons
+                          name="close-circle-outline"
+                          size={20}
+                          color={FAINT}
+                        />
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              <Text style={styles.sheetLabel}>Symptom</Text>
+              <View style={styles.chipWrap}>
+                {SYMPTOM_OPTIONS.map((option) => (
+                  <Pressable
+                    key={option}
+                    onPress={() => setSymptomType(option)}
+                    style={[
+                      styles.chip,
+                      symptomType === option && styles.chipActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        symptomType === option && styles.chipTextActive,
+                      ]}
+                    >
+                      {option}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={styles.sheetLabel}>Severity</Text>
+              <View style={styles.chipWrap}>
+                {SEVERITY_OPTIONS.map((option) => (
+                  <Pressable
+                    key={option}
+                    onPress={() => setSeverity(option)}
+                    style={[
+                      styles.chip,
+                      severity === option && styles.chipActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        severity === option && styles.chipTextActive,
+                      ]}
+                    >
+                      {capitalize(option)}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={styles.sheetLabel}>Mood (optional)</Text>
+              <View style={styles.chipWrap}>
+                {MOOD_OPTIONS.map((option) => (
+                  <Pressable
+                    key={option}
+                    onPress={() => setMood(mood === option ? null : option)}
+                    style={[styles.chip, mood === option && styles.chipActive]}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        mood === option && styles.chipTextActive,
+                      ]}
+                    >
+                      {option}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Pressable onPress={saveSymptom} style={styles.saveButton}>
+                <Text style={styles.saveButtonText}>Save symptom</Text>
+              </Pressable>
+            </>
+          )}
+        </Sheet>
+
+        {/* ======================================================
+            PERIOD LOGS SHEET
+            ====================================================== */}
+        <Sheet
+          visible={sheet === 'logs'}
+          title="Period logs"
+          subtitle={
+            sortedPeriods.length > 0
+              ? `${sortedPeriods.length} logged • avg ${periodLength} days`
+              : viewerMode
+              ? 'Her period history'
+              : 'Your period history'
+          }
+          busy={saving}
+          bottomInset={insets.bottom}
+          onClose={closeSheet}
+        >
+          {!viewerMode ? (
+            <View style={styles.logActions}>
+              {canEndPeriod ? (
+                <Pressable
+                  onPress={endPeriodToday}
+                  style={[styles.logButton, styles.logButtonGhost]}
+                >
+                  <Ionicons name="stop-circle-outline" size={17} color={PINK} />
+                  <Text style={styles.logButtonGhostText}>End today</Text>
+                </Pressable>
+              ) : null}
+
+              <Pressable
+                onPress={startPeriodToday}
+                disabled={startedToday}
+                style={[
+                  styles.logButton,
+                  styles.logButtonPrimary,
+                  startedToday && styles.logButtonDisabled,
+                ]}
+              >
+                <Ionicons name="add-circle-outline" size={17} color="#FFFFFF" />
+                <Text style={styles.logButtonPrimaryText}>
+                  {startedToday ? 'Started today' : 'Start today'}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {sortedPeriods.length === 0 ? (
+            <View style={[styles.card, styles.emptyCard]}>
+              <Ionicons name="calendar-clear-outline" size={25} color={FAINT} />
+              <Text style={styles.emptyTitle}>No periods logged yet</Text>
+              <Text style={styles.emptyText}>
+                {viewerMode
+                  ? 'Her period history will appear here once she starts tracking.'
+                  : 'Your period history will appear here once you start tracking.'}
+              </Text>
+            </View>
+          ) : (
+            <>
+              {groupByYear(visibleLogs).map(([year, items]) => (
+                <View key={year}>
+                  <Text style={styles.yearLabel}>{year}</Text>
+
+                  <View style={[styles.card, styles.listCard]}>
+                    {items.map((period, index) => {
+                      const isLatest = latestPeriod?.id === period.id;
+                      const length = calculatePeriodLength(period);
+
+                      const range = period.end_date
+                        ? `${formatShortDate(period.start_date)} – ${formatShortDate(
+                            period.end_date
+                          )}`
+                        : `${formatShortDate(period.start_date)} –`;
+
+                      const sub = period.end_date
+                        ? length
+                          ? `${length} day${length === 1 ? '' : 's'}`
+                          : ''
+                        : isLatest
+                        ? 'Ongoing'
+                        : 'No end date';
+
+                      return (
+                        <View
+                          key={period.id}
+                          style={[
+                            styles.logRow,
+                            index < items.length - 1 && styles.logRowBorder,
+                          ]}
+                        >
+                          <View
+                            style={[
+                              styles.logDot,
+                              isLatest && styles.logDotLatest,
+                            ]}
+                          />
+
+                          <View style={styles.logText}>
+                            <Text style={styles.logRange}>{range}</Text>
+                            {sub ? (
+                              <Text style={styles.logSub}>{sub}</Text>
+                            ) : null}
+                          </View>
+
+                          {isLatest ? (
+                            <View style={styles.latestBadge}>
+                              <Text style={styles.latestBadgeText}>Latest</Text>
+                            </View>
+                          ) : null}
+
+                          {!viewerMode && period.id !== 'shared-summary' ? (
+                            <Pressable
+                              onPress={() => deleteOwnPeriod(period)}
+                              hitSlop={10}
+                              style={styles.logDelete}
+                            >
+                              <Ionicons
+                                name="trash-outline"
+                                size={17}
+                                color={FAINT}
+                              />
+                            </Pressable>
+                          ) : null}
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              ))}
+
+              {hiddenLogsCount > 0 ? (
+                <Pressable
+                  onPress={() => setShowAllLogs(true)}
+                  style={styles.showMore}
+                >
+                  <Text style={styles.showMoreText}>
+                    Show {hiddenLogsCount} older
+                  </Text>
+                  <Ionicons name="chevron-down" size={16} color={PINK} />
+                </Pressable>
+              ) : showAllLogs && sortedPeriods.length > LOGS_PREVIEW_COUNT ? (
+                <Pressable
+                  onPress={() => setShowAllLogs(false)}
+                  style={styles.showMore}
+                >
+                  <Text style={styles.showMoreText}>Show less</Text>
+                  <Ionicons name="chevron-up" size={16} color={PINK} />
+                </Pressable>
+              ) : null}
+            </>
+          )}
+        </Sheet>
+      </View>
+    </Screen>
+  );
+}
+
+/* ============================================================
+   COMPONENTS
+   ============================================================ */
+
+function Sheet({
+  visible,
+  title,
+  subtitle,
+  busy,
+  bottomInset,
+  onClose,
+  children,
+}: {
+  visible: boolean;
+  title: string;
+  subtitle?: string;
+  busy?: boolean;
+  bottomInset: number;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalRoot}>
+        <Pressable style={styles.modalBackdrop} onPress={onClose} />
+
+        <View style={styles.sheet}>
+          <View style={styles.sheetHandle} />
+
+          <View style={styles.sheetHeader}>
+            <View style={styles.sheetHeaderText}>
+              <Text style={styles.sheetTitle}>{title}</Text>
+              {subtitle ? (
+                <Text style={styles.sheetSubtitle}>{subtitle}</Text>
+              ) : null}
+            </View>
+
+            {busy ? (
+              <ActivityIndicator
+                size="small"
+                color={PINK}
+                style={styles.sheetBusy}
+              />
+            ) : null}
+
+            <Pressable onPress={onClose} hitSlop={10} style={styles.sheetClose}>
+              <Ionicons name="close" size={18} color={TEXT} />
+            </Pressable>
+          </View>
+
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[
+              styles.sheetScroll,
+              { paddingBottom: 28 + bottomInset },
+            ]}
+          >
+            {children}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function FeatureTile({
+  icon,
+  iconColor,
+  background,
+  border,
+  title,
+  description,
+  width,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  iconColor: string;
+  background: string;
+  border: string;
+  title: string;
+  description: string;
+  width?: number;
+  onPress: () => void;
+}) {
+  return (
+    <PressScale
+      onPress={onPress}
+      scaleTo={0.96}
+      style={StyleSheet.flatten([
+        styles.tile,
+        width ? { flex: 0, width } : null,
+        { backgroundColor: background, borderColor: border },
+      ])}
+      contentStyle={styles.tileContent}
+    >
+      <View style={styles.tileTop}>
+        <View style={[styles.tileIcon, { backgroundColor: iconColor }]}>
+          <Ionicons name={icon} size={18} color="#FFFFFF" />
+        </View>
+        <Ionicons name="chevron-forward" size={14} color={MUTED} />
+      </View>
+
+      <Text style={styles.tileTitle} numberOfLines={1}>
+        {title}
+      </Text>
+
+      <Text style={styles.tileDescription} numberOfLines={3}>
+        {description}
+      </Text>
+    </PressScale>
+  );
+}
+
+function InfoCard({
+  icon,
+  label,
+  value,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={[styles.card, styles.infoCard]}>
+      <Ionicons name={icon} size={18} color={PINK} />
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.infoValue} numberOfLines={2}>
+        {value}
+      </Text>
     </View>
   );
 }
 
-// ============================================================
-// STYLES
-// ============================================================
+function TabItem({
+  label,
+  icon,
+  activeIcon,
+  active,
+  onPress,
+}: {
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  activeIcon: keyof typeof Ionicons.glyphMap;
+  active?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={styles.tabItem} hitSlop={6}>
+      <Ionicons
+        name={active ? activeIcon : icon}
+        size={26}
+        color={active ? PINK : MUTED}
+      />
+      <Text style={[styles.tabLabel, { color: active ? PINK : MUTED }]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/* ============================================================
+   STYLES
+   ============================================================ */
 
 const styles = StyleSheet.create({
-  screen: {
+  root: {
     flex: 1,
-    backgroundColor:
-      COLORS.background,
+    backgroundColor: BG,
   },
 
   container: {
     paddingHorizontal: 20,
-    paddingTop: 14,
-    paddingBottom: 40,
+    paddingTop: 12,
   },
 
-  center: {
+  loading: {
     flex: 1,
-    backgroundColor:
-      COLORS.background,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 28,
+    backgroundColor: BG,
   },
 
-  loadingText: {
-    marginTop: 12,
+  emptyScreen: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    backgroundColor: BG,
+  },
+
+  emptyIcon: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: PINK_SOFT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  emptyScreenTitle: {
+    marginTop: 18,
+    fontSize: 22,
+    color: TEXT,
+    fontWeight: '500',
+  },
+
+  emptyScreenText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: MUTED,
+    textAlign: 'center',
+    lineHeight: 21,
+  },
+
+  retryButton: {
+    marginTop: 20,
+    paddingHorizontal: 26,
+    paddingVertical: 13,
+    borderRadius: 24,
+    backgroundColor: PINK,
+  },
+
+  retryText: {
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
-    color: COLORS.muted,
   },
 
-  // ==========================================================
-  // HEADER
-  // ==========================================================
+  card: {
+    backgroundColor: CARD,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: LINE,
+  },
+
+  /* HEADER */
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 28,
   },
 
-  headerButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor:
-      COLORS.white,
-    borderWidth: 1,
-    borderColor:
-      COLORS.softBorder,
-  },
-
-  headerButtonPlaceholder: {
-    width: 44,
-    height: 44,
-  },
-
-  headerCenter: {
+  headerLeft: {
+    flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
 
-  headerEyebrow: {
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 2,
-    color: COLORS.pink,
-    marginBottom: 4,
+  backWrap: {
+    marginRight: 10,
+  },
+
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 
   headerTitle: {
-    fontSize: 19,
-    fontWeight: '700',
-    color: COLORS.charcoal,
-    letterSpacing: -0.3,
+    fontSize: 23,
+    fontWeight: '500',
+    color: TEXT,
   },
 
-  // ==========================================================
-  // INTRO
-  // ==========================================================
-
-  intro: {
-    marginBottom: 20,
-  },
-
-  introTitle: {
-    fontSize: 29,
-    lineHeight: 35,
-    fontWeight: '700',
-    letterSpacing: -0.8,
-    color: COLORS.charcoal,
-  },
-
-  introSubtitle: {
-    marginTop: 8,
-    maxWidth: 350,
+  headerSubtitle: {
+    marginTop: 3,
     fontSize: 14,
-    lineHeight: 21,
-    color: COLORS.muted,
+    color: MUTED,
   },
 
-  // ==========================================================
-  // PHASE
-  // ==========================================================
+  /* STRIP */
 
-  phaseCard: {
-    borderRadius: 25,
-    padding: 21,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor:
-      COLORS.softBorder,
-  },
-
-  phaseTopRow: {
+  strip: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    marginTop: 18,
+    marginHorizontal: -6,
   },
 
-  phaseIconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+  stripItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+
+  stripPill: {
+    width: '94%',
+    minHeight: 62,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+  },
+
+  stripPillActive: {
+    backgroundColor: '#FCDDE2',
+  },
+
+  stripNumber: {
+    fontSize: 16,
+    color: TEXT,
+  },
+
+  stripWeekday: {
+    marginTop: 5,
+    fontSize: 11,
+    color: MUTED,
+  },
+
+  stripTextActive: {
+    color: '#E5484D',
+    fontWeight: '600',
+  },
+
+  /* HERO */
+
+  heroWrap: {
+    alignSelf: 'center',
+    marginTop: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  estimatePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor:
-      'rgba(255,255,255,0.75)',
-  },
-
-  estimateText: {
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 1.1,
-    color: COLORS.muted,
-  },
-
-  phaseLabel: {
-    marginTop: 20,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-    color: COLORS.muted,
-  },
-
-  phaseTitle: {
-    marginTop: 4,
-    fontSize: 31,
-    lineHeight: 36,
-    fontWeight: '800',
-    letterSpacing: -0.8,
-  },
-
-  phaseDescription: {
-    marginTop: 5,
-    fontSize: 13.5,
-    lineHeight: 20,
-    color: COLORS.muted,
-  },
-
-  phaseStats: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 20,
-    paddingTop: 17,
-    borderTopWidth: 1,
-    borderTopColor:
-      'rgba(0,0,0,0.07)',
-  },
-
-  phaseStat: {
-    flex: 1,
-  },
-
-  phaseStatValue: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.charcoal,
-  },
-
-  phaseStatLabel: {
-    marginTop: 3,
-    fontSize: 11,
-    color: COLORS.muted,
-  },
-
-  statDivider: {
-    width: 1,
-    height: 34,
-    backgroundColor:
-      'rgba(0,0,0,0.08)',
-    marginHorizontal: 16,
-  },
-
-  // ==========================================================
-  // NEXT PERIOD
-  // ==========================================================
-
-  nextCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor:
-      COLORS.white,
-    borderRadius: 21,
-    padding: 17,
+  ring: {
+    position: 'absolute',
     borderWidth: 1,
-    borderColor:
-      COLORS.softBorder,
-    marginBottom: 26,
+    borderColor: 'rgba(244,118,143,0.12)',
   },
 
-  nextIconCircle: {
+  arcDot: {
+    position: 'absolute',
+    width: 3,
+    height: 3,
+    borderRadius: 2,
+    opacity: 0.5,
+  },
+
+  headDot: {
+    position: 'absolute',
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+  },
+
+  circleShadow: {
+    backgroundColor: '#FBE9ED',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 6,
+  },
+
+  circleClip: {
+    flex: 1,
+    overflow: 'hidden',
+  },
+
+  circleImage: {
+    width: '100%',
+    height: '100%',
+  },
+
+  heroTextBlock: {
+    alignItems: 'center',
+    marginTop: -30,
+    paddingHorizontal: 24,
+  },
+
+  heroIconHalo: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: BG,
+  },
+
+  heroIcon: {
     width: 44,
     height: 44,
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor:
-      COLORS.pinkSoft,
-    marginRight: 14,
   },
 
-  nextContent: {
+  heroLabel: {
+    marginTop: 10,
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 2.2,
+    textAlign: 'center',
+  },
+
+  heroTitle: {
+    marginTop: 6,
+    fontSize: 34,
+    fontWeight: '500',
+    color: TEXT,
+    textAlign: 'center',
+  },
+
+  heroDay: {
+    marginTop: 6,
+    fontSize: 15,
+    color: MUTED,
+    textAlign: 'center',
+  },
+
+  heroDescription: {
+    marginTop: 10,
+    fontSize: 14,
+    lineHeight: 21,
+    color: MUTED,
+    textAlign: 'center',
+  },
+
+  /* QUICK ACCESS ROW */
+
+  quickScroll: {
+    marginTop: 22,
+    marginHorizontal: -20,
+    flexGrow: 0,
+  },
+
+  quickContent: {
+    paddingHorizontal: 20,
+    gap: 10,
+  },
+
+  /* TILES */
+
+  tileRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 22,
+  },
+
+  tile: {
     flex: 1,
+    minWidth: 0,
+    borderRadius: 18,
+    borderWidth: 1,
   },
 
-  cardEyebrow: {
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-    color: COLORS.muted,
+  tileContent: {
+    padding: 10,
+    minHeight: 126,
   },
 
-  nextDate: {
-    marginTop: 3,
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.charcoal,
+  tileTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
   },
 
-  nextHint: {
-    marginTop: 3,
+  tileIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  tileTitle: {
+    marginTop: 10,
+    fontSize: 13,
+    fontWeight: '500',
+    color: TEXT,
+  },
+
+  tileDescription: {
+    marginTop: 5,
+    fontSize: 10,
+    lineHeight: 15,
+    color: MUTED,
+  },
+
+  /* TODAY */
+
+  todayHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 24,
+  },
+
+  todayTitle: {
+    fontSize: 20,
+    color: TEXT,
+    fontWeight: '400',
+  },
+
+  todayDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginLeft: 12,
+    backgroundColor: PINK,
+  },
+
+  todayUpdates: {
+    marginLeft: 7,
     fontSize: 11,
-    lineHeight: 16,
-    color: COLORS.faint,
+    color: MUTED,
   },
 
-  // ==========================================================
-  // SECTIONS
-  // ==========================================================
-
-  section: {
-    marginBottom: 27,
+  todayRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
   },
 
-  sectionHeader: {
+  todayCard: {
+    flex: 1,
+    borderRadius: 18,
+    backgroundColor: '#FDEDF0',
+    borderWidth: 1,
+    borderColor: PINK_BORDER,
+  },
+
+  todayCardPurple: {
+    flex: 1,
+    borderRadius: 18,
+    backgroundColor: PURPLE_SOFT,
+    borderWidth: 1,
+    borderColor: '#E1D9F5',
+  },
+
+  todayCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+  },
+
+  todayIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  todayText: {
+    flex: 1,
+    marginLeft: 10,
+  },
+
+  todayCardTitle: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: TEXT,
+  },
+
+  todayCardSub: {
+    marginTop: 3,
+    fontSize: 10,
+    color: MUTED,
+  },
+
+  /* INFO */
+
+  infoRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+
+  infoCard: {
+    flex: 1,
+    padding: 13,
+    minHeight: 98,
+  },
+
+  infoLabel: {
+    marginTop: 9,
+    fontSize: 10,
+    color: MUTED,
+  },
+
+  infoValue: {
+    marginTop: 4,
+    fontSize: 13,
+    color: TEXT,
+    fontWeight: '500',
+  },
+
+  /* CALENDAR (inside sheet) */
+
+  calendarHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
   },
 
-  sectionEyebrow: {
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-    color: COLORS.muted,
-  },
-
-  sectionTitle: {
-    marginTop: 4,
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: -0.3,
-    color: COLORS.charcoal,
-  },
-
-  // ==========================================================
-  // CALENDAR
-  // ==========================================================
-
-  monthButtons: {
-    flexDirection: 'row',
-    gap: 7,
-  },
-
-  monthButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor:
-      COLORS.white,
+  arrowButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: PINK_SOFT,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor:
-      COLORS.softBorder,
   },
 
-  calendarCard: {
-    backgroundColor:
-      COLORS.white,
-    borderRadius: 23,
-    borderWidth: 1,
-    borderColor:
-      COLORS.softBorder,
-    padding: 14,
+  monthTitle: {
+    fontSize: 15,
+    color: TEXT,
+    fontWeight: '500',
   },
 
-  weekHeader: {
+  weekRow: {
     flexDirection: 'row',
-    marginBottom: 8,
+    marginTop: 16,
   },
 
-  weekDay: {
-    flex: 1,
+  weekText: {
+    width: '14.285%',
     textAlign: 'center',
-    fontSize: 10,
-    fontWeight: '800',
-    color: COLORS.faint,
+    fontSize: 11,
+    fontWeight: '500',
+    color: FAINT,
   },
 
   calendarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    marginTop: 6,
   },
 
   dayCell: {
-    width: '14.2857%',
-    aspectRatio: 1,
+    width: '14.285%',
+    height: 42,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   dayCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   dayText: {
     fontSize: 12,
+    color: TEXT,
+  },
+
+  periodDay: {
+    backgroundColor: PINK,
+  },
+
+  periodDayText: {
+    color: '#FFFFFF',
     fontWeight: '600',
-    color: COLORS.charcoal,
   },
 
-  dayOutside: {
-    opacity: 0.32,
-  },
-
-  dayOutsideText: {
-    color: COLORS.faint,
-  },
-
-  dayPeriod: {
-    backgroundColor:
-      COLORS.pink,
-  },
-
-  dayPeriodText: {
-    color:
-      COLORS.white,
-    fontWeight: '800',
-  },
-
-  dayFertile: {
-    backgroundColor:
-      COLORS.blueSoft,
-    borderWidth: 1,
-    borderColor:
-      COLORS.blueBorder,
-  },
-
-  dayOvulation: {
-    backgroundColor:
-      COLORS.lavender,
-  },
-
-  dayOvulationText: {
-    color:
-      COLORS.white,
-    fontWeight: '800',
-  },
-
-  dayToday: {
+  todayDay: {
     borderWidth: 1.5,
-    borderColor:
-      COLORS.charcoal,
-  },
-
-  dayTodayText: {
-    fontWeight: '900',
+    borderColor: BLUE,
   },
 
   legend: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 15,
-    marginTop: 17,
-    paddingTop: 14,
-    borderTopWidth: 1,
-    borderTopColor:
-      COLORS.softBorder,
+    gap: 16,
+    marginTop: 14,
   },
 
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
   },
 
   legendDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    marginRight: 6,
+  },
+
+  periodLegend: {
+    backgroundColor: PINK,
+  },
+
+  todayLegend: {
+    borderWidth: 1.5,
+    borderColor: BLUE,
   },
 
   legendText: {
-    fontSize: 10.5,
-    color: COLORS.muted,
-    fontWeight: '600',
+    fontSize: 10,
+    color: MUTED,
   },
 
-  // ==========================================================
-  // DETAILS
-  // ==========================================================
+  /* EMPTY / LIST CARDS */
 
-  detailsCard: {
-    marginTop: 12,
-    backgroundColor:
-      COLORS.white,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor:
-      COLORS.softBorder,
-    paddingHorizontal: 16,
-  },
-
-  detailRow: {
-    flexDirection: 'row',
+  emptyCard: {
     alignItems: 'center',
-    paddingVertical: 15,
+    padding: 26,
   },
 
-  detailIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor:
-      COLORS.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
+  emptyTitle: {
+    marginTop: 10,
+    fontSize: 15,
+    color: TEXT,
+    fontWeight: '500',
   },
 
-  detailContent: {
-    flex: 1,
-  },
-
-  detailLabel: {
+  emptyText: {
+    marginTop: 6,
     fontSize: 12,
-    color: COLORS.muted,
+    lineHeight: 18,
+    color: MUTED,
+    textAlign: 'center',
   },
 
-  detailValue: {
-    marginTop: 3,
-    fontSize: 14,
-    fontWeight: '800',
-    color: COLORS.charcoal,
+  listCard: {
+    paddingHorizontal: 14,
   },
 
-  detailDivider: {
-    height: 1,
-    backgroundColor:
-      COLORS.softBorder,
-  },
-
-  // ==========================================================
-  // SYMPTOMS
-  // ==========================================================
-
-  countPill: {
-    minWidth: 30,
-    height: 30,
-    paddingHorizontal: 9,
-    borderRadius: 15,
-    backgroundColor:
-      COLORS.pinkSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  countPillText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: COLORS.pink,
-  },
-
-  symptomsCard: {
-    backgroundColor:
-      COLORS.white,
-    borderRadius: 21,
-    borderWidth: 1,
-    borderColor:
-      COLORS.softBorder,
-    paddingHorizontal: 16,
-  },
+  /* SYMPTOM LIST (viewer) */
 
   symptomRow: {
     flexDirection: 'row',
@@ -2524,231 +2277,364 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
   },
 
-  symptomRowBorder: {
+  symptomBorder: {
     borderBottomWidth: 1,
-    borderBottomColor:
-      COLORS.softBorder,
+    borderBottomColor: LINE,
   },
 
-  symptomIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor:
-      COLORS.pinkSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 11,
-  },
-
-  symptomContent: {
-    flex: 1,
+  symptomDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: PURPLE,
+    marginRight: 10,
   },
 
   symptomName: {
+    flex: 1,
     fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.charcoal,
+    fontWeight: '500',
+    color: TEXT,
   },
 
-  symptomSeverity: {
+  symptomMeta: {
+    fontSize: 11,
+    color: MUTED,
+  },
+
+  /* PERIOD LOGS */
+
+  logActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 6,
+  },
+
+  logButton: {
+    flex: 1,
+    height: 44,
+    borderRadius: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+
+  logButtonPrimary: {
+    backgroundColor: PINK,
+  },
+
+  logButtonPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  logButtonGhost: {
+    backgroundColor: PINK_SOFT,
+    borderWidth: 1,
+    borderColor: PINK_BORDER,
+  },
+
+  logButtonGhostText: {
+    color: PINK,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  logButtonDisabled: {
+    opacity: 0.45,
+  },
+
+  yearLabel: {
+    marginTop: 18,
+    marginBottom: 8,
+    fontSize: 12,
+    fontWeight: '600',
+    color: MUTED,
+    letterSpacing: 0.5,
+  },
+
+  logRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 13,
+  },
+
+  logRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: LINE,
+  },
+
+  logDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: PINK_BORDER,
+    marginRight: 12,
+  },
+
+  logDotLatest: {
+    backgroundColor: PINK,
+  },
+
+  logText: {
+    flex: 1,
+  },
+
+  logRange: {
+    fontSize: 14,
+    color: TEXT,
+    fontWeight: '500',
+  },
+
+  logSub: {
     marginTop: 2,
     fontSize: 11,
-    color: COLORS.muted,
-    textTransform: 'capitalize',
+    color: MUTED,
   },
 
-  noSymptomsCard: {
+  latestBadge: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 10,
+    backgroundColor: PINK_SOFT,
+    marginLeft: 8,
+  },
+
+  latestBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: PINK,
+  },
+
+  logDelete: {
+    marginLeft: 12,
+  },
+
+  showMore: {
+    marginTop: 14,
+    height: 42,
+    borderRadius: 21,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor:
-      COLORS.greenSoft,
-    borderRadius: 18,
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: PINK_SOFT,
+  },
+
+  showMoreText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: PINK,
+  },
+
+  /* SHARING NOTE */
+
+  noteCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
     padding: 15,
-    borderWidth: 1,
-    borderColor:
-      '#D7EBDD',
+    marginTop: 24,
   },
 
-  noSymptomsText: {
-    marginLeft: 9,
+  noteIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: PINK_SOFT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  noteText: {
     flex: 1,
-    fontSize: 12.5,
-    lineHeight: 18,
-    color: COLORS.muted,
+    marginLeft: 12,
   },
 
-  // ==========================================================
-  // ESTIMATE NOTE
-  // ==========================================================
+  noteTitle: {
+    fontSize: 13,
+    color: TEXT,
+    fontWeight: '500',
+  },
 
-  estimateNote: {
+  noteDescription: {
+    marginTop: 3,
+    fontSize: 10,
+    lineHeight: 15,
+    color: MUTED,
+  },
+
+  /* BOTTOM NAV */
+
+  tabBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor:
-      COLORS.blueSoft,
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1,
-    borderColor:
-      COLORS.blueBorder,
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderTopWidth: 1,
+    borderTopColor: LINE,
+    paddingTop: 10,
   },
 
-  estimateNoteText: {
+  tabItem: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 90,
+    minHeight: 52,
+  },
+
+  tabLabel: {
+    marginTop: 3,
+    fontSize: 11,
+  },
+
+  /* SHEETS */
+
+  modalRoot: {
     flex: 1,
-    marginLeft: 9,
-    fontSize: 11.5,
-    lineHeight: 17,
-    color: COLORS.muted,
+    justifyContent: 'flex-end',
   },
 
-  bottomSpace: {
-    height: 20,
+  modalBackdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(25,25,35,0.28)',
   },
 
-  // ==========================================================
-  // PRIVATE / EMPTY
-  // ==========================================================
+  sheet: {
+    maxHeight: '88%',
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    overflow: 'hidden',
+  },
 
-  privateCard: {
-    backgroundColor:
-      COLORS.white,
-    borderRadius: 26,
-    padding: 25,
+  sheetHandle: {
+    alignSelf: 'center',
+    marginTop: 10,
+    width: 42,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#D9D9DE',
+  },
+
+  sheetHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor:
-      COLORS.softBorder,
-    marginTop: 30,
-  },
-
-  privateIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor:
-      COLORS.pinkSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 17,
-  },
-
-  privateTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: COLORS.charcoal,
-    textAlign: 'center',
-  },
-
-  privateText: {
-    marginTop: 9,
-    fontSize: 13.5,
-    lineHeight: 21,
-    color: COLORS.muted,
-    textAlign: 'center',
-  },
-
-  privateDivider: {
-    width: '100%',
-    height: 1,
-    backgroundColor:
-      COLORS.softBorder,
-    marginVertical: 19,
-  },
-
-  privateHint: {
-    fontSize: 11.5,
-    lineHeight: 17,
-    color: COLORS.faint,
-    textAlign: 'center',
-  },
-
-  emptyCard: {
-    backgroundColor:
-      COLORS.white,
-    borderRadius: 26,
-    padding: 25,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor:
-      COLORS.softBorder,
-    marginTop: 30,
-  },
-
-  emptyIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor:
-      COLORS.blueSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 17,
-  },
-
-  emptyTitle: {
-    fontSize: 19,
-    lineHeight: 25,
-    fontWeight: '800',
-    color: COLORS.charcoal,
-    textAlign: 'center',
-  },
-
-  emptyText: {
-    marginTop: 9,
-    fontSize: 13.5,
-    lineHeight: 21,
-    color: COLORS.muted,
-    textAlign: 'center',
-  },
-
-  // ==========================================================
-  // ERROR
-  // ==========================================================
-
-  errorIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor:
-      COLORS.pinkSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 14,
-  },
-
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: COLORS.charcoal,
-    textAlign: 'center',
-  },
-
-  errorText: {
-    marginTop: 8,
-    fontSize: 13,
-    lineHeight: 20,
-    color: COLORS.muted,
-    textAlign: 'center',
-    maxWidth: 320,
-  },
-
-  primaryButton: {
-    marginTop: 18,
-    minWidth: 130,
-    height: 48,
     paddingHorizontal: 22,
-    borderRadius: 24,
-    backgroundColor:
-      COLORS.charcoal,
+    paddingTop: 16,
+  },
+
+  sheetHeaderText: {
+    flex: 1,
+  },
+
+  sheetBusy: {
+    marginRight: 12,
+  },
+
+  sheetClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F4F1F2',
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  primaryButtonText: {
-    color:
-      COLORS.white,
+  sheetScroll: {
+    paddingHorizontal: 22,
+    paddingTop: 16,
+  },
+
+  sheetTitle: {
+    fontSize: 22,
+    color: TEXT,
+    fontWeight: '500',
+  },
+
+  sheetSubtitle: {
+    marginTop: 3,
     fontSize: 13,
-    fontWeight: '800',
+    color: MUTED,
+  },
+
+  sheetLabel: {
+    marginTop: 20,
+    marginBottom: 9,
+    fontSize: 12,
+    color: TEXT,
+    fontWeight: '600',
+  },
+
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: LINE,
+    backgroundColor: '#FFFFFF',
+  },
+
+  chipActive: {
+    backgroundColor: PINK_SOFT,
+    borderColor: PINK_BORDER,
+  },
+
+  chipText: {
+    fontSize: 12,
+    color: MUTED,
+  },
+
+  chipTextActive: {
+    color: PINK,
+    fontWeight: '600',
+  },
+
+  loggedBlock: {
+    padding: 13,
+    borderRadius: 16,
+    backgroundColor: '#FAF8FA',
+  },
+
+  loggedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+
+  loggedText: {
+    flex: 1,
+    marginRight: 10,
+    fontSize: 12,
+    color: TEXT,
+  },
+
+  saveButton: {
+    marginTop: 25,
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: PINK,
+  },
+
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

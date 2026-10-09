@@ -1,6 +1,13 @@
 // ============================================================
 // BETWEEN US — PERIOD / CYCLE DATA LAYER
 // src/lib/period.ts
+//
+// Shared cycle system:
+// - Girlfriend can create/update/delete her own period data.
+// - Partner can read the girlfriend's cycle data.
+// - No privacy / visibility settings.
+// - No share_symptoms / share_mood / share_flow settings.
+// - The database RPC is responsible for returning partner data.
 // ============================================================
 
 import { supabase } from './supabase';
@@ -9,15 +16,7 @@ import { supabase } from './supabase';
 // TYPES
 // ============================================================
 
-export type PeriodVisibility =
-  | 'private'
-  | 'summary'
-  | 'full';
-
-export type SymptomSeverity =
-  | 'mild'
-  | 'moderate'
-  | 'strong';
+export type SymptomSeverity = 'mild' | 'moderate' | 'strong';
 
 export type CyclePhase =
   | 'Period'
@@ -27,84 +26,36 @@ export type CyclePhase =
 
 export type PeriodSettings = {
   tracking_enabled: boolean;
-
-  partner_visibility:
-    | PeriodVisibility;
-
   average_cycle_length: number;
-
   average_period_length: number;
-
-  share_symptoms?: boolean;
-
-  share_mood?: boolean;
-
-  share_flow?: boolean;
 };
 
 export type PeriodLog = {
   id: string;
-
   start_date: string;
-
-  end_date:
-    | string
-    | null;
-
-  notes?:
-    | string
-    | null;
-
-  created_at?:
-    | string
-    | null;
-
-  updated_at?:
-    | string
-    | null;
+  end_date: string | null;
+  notes?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 export type PeriodSymptom = {
   id: string;
-
   symptom_date: string;
-
   symptom_type: string;
-
   severity: SymptomSeverity;
-
-  mood?:
-    | string
-    | null;
-
-  energy_level?:
-    | number
-    | null;
-
-  created_at?:
-    | string
-    | null;
-
-  updated_at?:
-    | string
-    | null;
+  mood?: string | null;
+  energy_level?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 export type PartnerPeriodSummary = {
-  partner_visibility:
-    | PeriodVisibility;
-
-  latest_period_start:
-    | string
-    | null;
-
-  predicted_next_period:
-    | string
-    | null;
-
+  latest_period_start: string | null;
+  predicted_next_period: string | null;
   average_cycle_length: number;
-
-  average_period_length?: number;
+  average_period_length: number;
+  tracking_enabled?: boolean;
 };
 
 export type PeriodDashboard = {
@@ -112,49 +63,26 @@ export type PeriodDashboard = {
 
   own: {
     settings: PeriodSettings;
-
     periods: PeriodLog[];
-
     symptoms: PeriodSymptom[];
   };
 
   partner: {
-    visibility:
-      | PeriodVisibility;
-
     settings?: PartnerPeriodSummary;
-
-    periods?: PeriodLog[];
-
-    symptoms?: PeriodSymptom[];
+    periods: PeriodLog[];
+    symptoms: PeriodSymptom[];
   } | null;
 };
 
 export type CurrentCycleInfo = {
   cycleDay: number | null;
-
   phase: CyclePhase;
-
-  latestPeriod:
-    | PeriodLog
-    | null;
-
-  nextPeriod:
-    | string
-    | null;
-
-  ovulationDate:
-    | string
-    | null;
-
+  latestPeriod: PeriodLog | null;
+  nextPeriod: string | null;
+  ovulationDate: string | null;
   fertileWindow: {
-    start:
-      | string
-      | null;
-
-    end:
-      | string
-      | null;
+    start: string | null;
+    end: string | null;
   };
 };
 
@@ -164,68 +92,33 @@ export type CurrentCycleInfo = {
 
 const DEFAULT_SETTINGS: PeriodSettings = {
   tracking_enabled: true,
-
-  partner_visibility:
-    'private',
-
   average_cycle_length: 28,
-
   average_period_length: 5,
-
-  share_symptoms: true,
-
-  share_mood: true,
-
-  share_flow: true,
 };
 
 // ============================================================
 // DATE HELPERS
 // ============================================================
 
-export function formatDate(
-  date: Date
-): string {
-  const year =
-    date.getFullYear();
-
-  const month =
-    String(
-      date.getMonth() + 1
-    ).padStart(2, '0');
-
-  const day =
-    String(
-      date.getDate()
-    ).padStart(2, '0');
+export function formatDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
 
   return `${year}-${month}-${day}`;
 }
 
-export function parseDate(
-  dateString: string
-): Date {
-  return new Date(
-    `${dateString}T12:00:00`
-  );
+export function parseDate(dateString: string): Date {
+  return new Date(`${dateString}T12:00:00`);
 }
 
 export function getTodayString(): string {
-  return formatDate(
-    new Date()
-  );
+  return formatDate(new Date());
 }
 
-export function addDays(
-  dateString: string,
-  days: number
-): string {
-  const date =
-    parseDate(dateString);
-
-  date.setDate(
-    date.getDate() + days
-  );
+export function addDays(dateString: string, days: number): string {
+  const date = parseDate(dateString);
+  date.setDate(date.getDate() + days);
 
   return formatDate(date);
 }
@@ -234,19 +127,13 @@ export function daysBetween(
   startDate: string,
   endDate: string
 ): number {
-  const start =
-    parseDate(startDate);
+  const start = parseDate(startDate);
+  const end = parseDate(endDate);
 
-  const end =
-    parseDate(endDate);
+  const difference = end.getTime() - start.getTime();
 
-  const difference =
-    end.getTime() -
-    start.getTime();
-
-  return Math.floor(
-    difference /
-      (1000 * 60 * 60 * 24)
+  return Math.round(
+    difference / (1000 * 60 * 60 * 24)
   );
 }
 
@@ -255,10 +142,7 @@ export function isDateInRange(
   start: string,
   end: string
 ): boolean {
-  return (
-    date >= start &&
-    date <= end
-  );
+  return date >= start && date <= end;
 }
 
 // ============================================================
@@ -267,29 +151,30 @@ export function isDateInRange(
 
 export function isDateInPeriod(
   date: string,
-  period: PeriodLog
+  period: PeriodLog,
+  defaultLength: number = 5
 ): boolean {
-  const start =
-    period.start_date;
+  const start = period.start_date;
 
+  /*
+   * If no end date has been recorded yet,
+   * temporarily use the configured average period length.
+   */
   const end =
     period.end_date ||
-    period.start_date;
+    addDays(
+      period.start_date,
+      Math.max(1, defaultLength) - 1
+    );
 
-  return (
-    date >= start &&
-    date <= end
-  );
+  return date >= start && date <= end;
 }
 
 export function sortPeriods(
   periods: PeriodLog[]
 ): PeriodLog[] {
-  return [...periods].sort(
-    (a, b) =>
-      b.start_date.localeCompare(
-        a.start_date
-      )
+  return [...periods].sort((a, b) =>
+    b.start_date.localeCompare(a.start_date)
   );
 }
 
@@ -300,31 +185,18 @@ export function getLatestPeriod(
     return null;
   }
 
-  return (
-    sortPeriods(periods)[0] ||
-    null
-  );
+  return sortPeriods(periods)[0] || null;
 }
 
 export function getCycleDay(
-  latestStart:
-    | string
-    | null,
-  today:
-    | string
-    | null = getTodayString()
+  latestStart: string | null,
+  today: string | null = getTodayString()
 ): number | null {
   if (!latestStart || !today) {
     return null;
   }
 
-  const difference =
-    daysBetween(
-      latestStart,
-      today
-    );
-
-  return difference + 1;
+  return daysBetween(latestStart, today) + 1;
 }
 
 // ============================================================
@@ -332,47 +204,40 @@ export function getCycleDay(
 // ============================================================
 
 export function getCyclePhase(
-  cycleDay:
-    | number
-    | null,
-  averageCycleLength:
-    number,
-  averagePeriodLength:
-    number
+  cycleDay: number | null,
+  averageCycleLength: number,
+  averagePeriodLength: number
 ): CyclePhase {
-  if (
-    !cycleDay ||
-    cycleDay <= 0
-  ) {
+  if (!cycleDay || cycleDay <= 0) {
     return 'Follicular';
   }
 
-  if (
-    cycleDay <=
-    averagePeriodLength
-  ) {
+  const safeCycleLength =
+    Number.isFinite(averageCycleLength) &&
+    averageCycleLength > 0
+      ? averageCycleLength
+      : 28;
+
+  const safePeriodLength =
+    Number.isFinite(averagePeriodLength) &&
+    averagePeriodLength > 0
+      ? averagePeriodLength
+      : 5;
+
+  if (cycleDay <= safePeriodLength) {
     return 'Period';
   }
 
-  const ovulationDay =
-    Math.max(
-      1,
-      averageCycleLength - 14
-    );
+  const ovulationDay = Math.max(
+    1,
+    safeCycleLength - 14
+  );
 
-  if (
-    Math.abs(
-      cycleDay -
-        ovulationDay
-    ) <= 1
-  ) {
+  if (Math.abs(cycleDay - ovulationDay) <= 1) {
     return 'Ovulation';
   }
 
-  if (
-    cycleDay <
-    ovulationDay
-  ) {
+  if (cycleDay < ovulationDay) {
     return 'Follicular';
   }
 
@@ -409,21 +274,23 @@ export function getPhaseDescription(
 // ============================================================
 
 export function getEstimatedOvulationDate(
-  latestStart:
-    | string
-    | null,
-  cycleLength:
-    number
+  latestStart: string | null,
+  cycleLength: number
 ): string | null {
   if (!latestStart) {
     return null;
   }
 
-  const ovulationOffset =
-    Math.max(
-      1,
-      cycleLength - 14
-    );
+  const safeCycleLength =
+    Number.isFinite(cycleLength) &&
+    cycleLength > 0
+      ? cycleLength
+      : 28;
+
+  const ovulationOffset = Math.max(
+    1,
+    safeCycleLength - 14
+  );
 
   return addDays(
     latestStart,
@@ -432,12 +299,12 @@ export function getEstimatedOvulationDate(
 }
 
 export function getFertileWindow(
-  latestStart:
-    | string
-    | null,
-  cycleLength:
-    number
-) {
+  latestStart: string | null,
+  cycleLength: number
+): {
+  start: string | null;
+  end: string | null;
+} {
   if (!latestStart) {
     return {
       start: null,
@@ -445,11 +312,10 @@ export function getFertileWindow(
     };
   }
 
-  const ovulation =
-    getEstimatedOvulationDate(
-      latestStart,
-      cycleLength
-    );
+  const ovulation = getEstimatedOvulationDate(
+    latestStart,
+    cycleLength
+  );
 
   if (!ovulation) {
     return {
@@ -459,15 +325,8 @@ export function getFertileWindow(
   }
 
   return {
-    start: addDays(
-      ovulation,
-      -5
-    ),
-
-    end: addDays(
-      ovulation,
-      1
-    ),
+    start: addDays(ovulation, -5),
+    end: addDays(ovulation, 1),
   };
 }
 
@@ -479,18 +338,21 @@ export function getPredictedNextPeriod(
   periods: PeriodLog[],
   cycleLength: number
 ): string | null {
-  const latest =
-    getLatestPeriod(
-      periods
-    );
+  const latest = getLatestPeriod(periods);
 
   if (!latest) {
     return null;
   }
 
+  const safeCycleLength =
+    Number.isFinite(cycleLength) &&
+    cycleLength > 0
+      ? cycleLength
+      : 28;
+
   return addDays(
     latest.start_date,
-    cycleLength
+    safeCycleLength
   );
 }
 
@@ -500,32 +362,21 @@ export function getPredictedNextPeriod(
 
 export function getCurrentCycleInfo(
   periods: PeriodLog[],
-  settings:
-    | PeriodSettings
-    | null
-    | undefined
+  settings: PeriodSettings | null | undefined
 ): CurrentCycleInfo {
   const safeSettings =
-    settings ||
-    DEFAULT_SETTINGS;
+    settings || DEFAULT_SETTINGS;
 
   const latestPeriod =
-    getLatestPeriod(
-      periods
-    );
+    getLatestPeriod(periods);
 
   if (!latestPeriod) {
     return {
       cycleDay: null,
-
       phase: 'Follicular',
-
       latestPeriod: null,
-
       nextPeriod: null,
-
       ovulationDate: null,
-
       fertileWindow: {
         start: null,
         end: null,
@@ -533,32 +384,25 @@ export function getCurrentCycleInfo(
     };
   }
 
-  const today =
-    getTodayString();
+  const today = getTodayString();
 
-  let cycleDay =
-    getCycleDay(
-      latestPeriod.start_date,
-      today
-    );
+  let cycleDay = getCycleDay(
+    latestPeriod.start_date,
+    today
+  );
 
   /*
-   * If the current date is before the latest logged period,
-   * don't return a negative/invalid cycle day.
+   * Never expose an invalid negative cycle day.
    */
-  if (
-    cycleDay !== null &&
-    cycleDay < 1
-  ) {
+  if (cycleDay !== null && cycleDay < 1) {
     cycleDay = null;
   }
 
-  const phase =
-    getCyclePhase(
-      cycleDay,
-      safeSettings.average_cycle_length,
-      safeSettings.average_period_length
-    );
+  const phase = getCyclePhase(
+    cycleDay,
+    safeSettings.average_cycle_length,
+    safeSettings.average_period_length
+  );
 
   const nextPeriod =
     getPredictedNextPeriod(
@@ -580,16 +424,97 @@ export function getCurrentCycleInfo(
 
   return {
     cycleDay,
-
     phase,
-
     latestPeriod,
-
     nextPeriod,
-
     ovulationDate,
-
     fertileWindow,
+  };
+}
+
+// ============================================================
+// CYCLE INFO FOR ANY DATE
+// ============================================================
+
+export function getCycleInfoForDate(
+  periods: PeriodLog[],
+  settings: PeriodSettings | null | undefined,
+  date: string
+): CurrentCycleInfo {
+  const safeSettings =
+    settings || DEFAULT_SETTINGS;
+
+  const cycleLength =
+    Number(safeSettings.average_cycle_length) ||
+    28;
+
+  const periodLength =
+    Number(safeSettings.average_period_length) ||
+    5;
+
+  /*
+   * Find the latest period that started on or before
+   * the selected date.
+   */
+  const anchor =
+    sortPeriods(periods).find(
+      (period) =>
+        period.start_date <= date
+    ) || null;
+
+  if (!anchor) {
+    return {
+      cycleDay: null,
+      phase: 'Follicular',
+      latestPeriod: null,
+      nextPeriod: null,
+      ovulationDate: null,
+      fertileWindow: {
+        start: null,
+        end: null,
+      },
+    };
+  }
+
+  const rawDay =
+    daysBetween(
+      anchor.start_date,
+      date
+    ) + 1;
+
+  /*
+   * Wrap after the predicted cycle length so the calendar
+   * continues showing a meaningful cycle day.
+   */
+  const cycleDay =
+    rawDay > cycleLength
+      ? ((rawDay - 1) % cycleLength) + 1
+      : rawDay;
+
+  const phase = getCyclePhase(
+    cycleDay,
+    cycleLength,
+    periodLength
+  );
+
+  return {
+    cycleDay,
+    phase,
+    latestPeriod: anchor,
+    nextPeriod: getPredictedNextPeriod(
+      periods,
+      cycleLength
+    ),
+    ovulationDate:
+      getEstimatedOvulationDate(
+        anchor.start_date,
+        cycleLength
+      ),
+    fertileWindow:
+      getFertileWindow(
+        anchor.start_date,
+        cycleLength
+      ),
   };
 }
 
@@ -603,50 +528,31 @@ function normalizeSettings(
     | null
     | undefined
 ): PeriodSettings {
+  const averageCycleLength =
+    Number(value?.average_cycle_length);
+
+  const averagePeriodLength =
+    Number(value?.average_period_length);
+
   return {
     tracking_enabled:
-      typeof value?.tracking_enabled ===
-      'boolean'
+      typeof value?.tracking_enabled === 'boolean'
         ? value.tracking_enabled
         : DEFAULT_SETTINGS.tracking_enabled,
 
-    partner_visibility:
-      value?.partner_visibility ===
-        'summary' ||
-      value?.partner_visibility ===
-        'full'
-        ? value.partner_visibility
-        : 'private',
-
     average_cycle_length:
-      Number(
-        value?.average_cycle_length
-      ) ||
-      DEFAULT_SETTINGS.average_cycle_length,
+      Number.isFinite(averageCycleLength) &&
+      averageCycleLength >= 15 &&
+      averageCycleLength <= 60
+        ? averageCycleLength
+        : DEFAULT_SETTINGS.average_cycle_length,
 
     average_period_length:
-      Number(
-        value?.average_period_length
-      ) ||
-      DEFAULT_SETTINGS.average_period_length,
-
-    share_symptoms:
-      typeof value?.share_symptoms ===
-      'boolean'
-        ? value.share_symptoms
-        : DEFAULT_SETTINGS.share_symptoms,
-
-    share_mood:
-      typeof value?.share_mood ===
-      'boolean'
-        ? value.share_mood
-        : DEFAULT_SETTINGS.share_mood,
-
-    share_flow:
-      typeof value?.share_flow ===
-      'boolean'
-        ? value.share_flow
-        : DEFAULT_SETTINGS.share_flow,
+      Number.isFinite(averagePeriodLength) &&
+      averagePeriodLength >= 1 &&
+      averagePeriodLength <= 14
+        ? averagePeriodLength
+        : DEFAULT_SETTINGS.average_period_length,
   };
 }
 
@@ -654,83 +560,123 @@ function normalizePeriod(
   value: any
 ): PeriodLog {
   return {
-    id:
-      String(
-        value?.id || ''
-      ),
-
-    start_date:
-      String(
-        value?.start_date || ''
-      ),
-
+    id: String(value?.id || ''),
+    start_date: String(
+      value?.start_date || ''
+    ),
     end_date:
-      value?.end_date ??
-      null,
-
+      value?.end_date ?? null,
     notes:
-      value?.notes ??
-      null,
-
+      value?.notes ?? null,
     created_at:
-      value?.created_at ??
-      null,
-
+      value?.created_at ?? null,
     updated_at:
-      value?.updated_at ??
-      null,
+      value?.updated_at ?? null,
   };
 }
 
 function normalizeSymptom(
   value: any
 ): PeriodSymptom {
-  const severity =
-    value?.severity ===
-      'moderate' ||
-    value?.severity ===
-      'strong'
+  const severity: SymptomSeverity =
+    value?.severity === 'moderate' ||
+    value?.severity === 'strong'
       ? value.severity
       : 'mild';
 
+  const energy =
+    value?.energy_level === null ||
+    value?.energy_level === undefined
+      ? null
+      : Number(value.energy_level);
+
   return {
-    id:
-      String(
-        value?.id || ''
-      ),
-
-    symptom_date:
-      String(
-        value?.symptom_date || ''
-      ),
-
-    symptom_type:
-      String(
-        value?.symptom_type || ''
-      ),
-
+    id: String(value?.id || ''),
+    symptom_date: String(
+      value?.symptom_date || ''
+    ),
+    symptom_type: String(
+      value?.symptom_type || ''
+    ),
     severity,
-
     mood:
-      value?.mood ??
-      null,
-
+      value?.mood ?? null,
     energy_level:
-      value?.energy_level ??
-      null,
-
+      Number.isFinite(energy)
+        ? energy
+        : null,
     created_at:
-      value?.created_at ??
-      null,
-
+      value?.created_at ?? null,
     updated_at:
-      value?.updated_at ??
-      null,
+      value?.updated_at ?? null,
+  };
+}
+
+function normalizePartnerSettings(
+  value: any
+): PartnerPeriodSummary | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const averageCycleLength =
+    Number(value?.average_cycle_length);
+
+  const averagePeriodLength =
+    Number(value?.average_period_length);
+
+  return {
+    latest_period_start:
+      value?.latest_period_start ?? null,
+
+    predicted_next_period:
+      value?.predicted_next_period ?? null,
+
+    average_cycle_length:
+      Number.isFinite(averageCycleLength) &&
+      averageCycleLength >= 15 &&
+      averageCycleLength <= 60
+        ? averageCycleLength
+        : 28,
+
+    average_period_length:
+      Number.isFinite(averagePeriodLength) &&
+      averagePeriodLength >= 1 &&
+      averagePeriodLength <= 14
+        ? averagePeriodLength
+        : 5,
+
+    tracking_enabled:
+      typeof value?.tracking_enabled === 'boolean'
+        ? value.tracking_enabled
+        : true,
   };
 }
 
 // ============================================================
 // GET PERIOD DASHBOARD
+// ============================================================
+//
+// IMPORTANT:
+//
+// The database function `get_period_dashboard` is responsible
+// for returning BOTH:
+//   1. the current user's own data
+//   2. their partner's data
+//
+// There is intentionally NO privacy filtering here.
+//
+// Therefore:
+// GF inputs period/symptom
+//        ↓
+// Supabase
+//        ↓
+// get_period_dashboard()
+//        ↓
+// BF receives GF data
+//
+// The same function works in reverse if the account roles
+// are the same or the other partner is the one entering data.
 // ============================================================
 
 export async function getPeriodDashboard(): Promise<PeriodDashboard> {
@@ -745,8 +691,7 @@ export async function getPeriodDashboard(): Promise<PeriodDashboard> {
     throw error;
   }
 
-  const raw =
-    (data || {}) as any;
+  const raw = (data || {}) as any;
 
   const ownRaw =
     raw?.own || {};
@@ -755,18 +700,14 @@ export async function getPeriodDashboard(): Promise<PeriodDashboard> {
     raw?.partner || null;
 
   const ownPeriods: PeriodLog[] =
-    Array.isArray(
-      ownRaw?.periods
-    )
+    Array.isArray(ownRaw?.periods)
       ? ownRaw.periods.map(
           normalizePeriod
         )
       : [];
 
   const ownSymptoms: PeriodSymptom[] =
-    Array.isArray(
-      ownRaw?.symptoms
-    )
+    Array.isArray(ownRaw?.symptoms)
       ? ownRaw.symptoms.map(
           normalizeSymptom
         )
@@ -796,51 +737,10 @@ export async function getPeriodDashboard(): Promise<PeriodDashboard> {
         : [];
 
     partner = {
-      visibility:
-        partnerRaw?.visibility ===
-          'summary' ||
-        partnerRaw?.visibility ===
-          'full'
-          ? partnerRaw.visibility
-          : 'private',
-
       settings:
-        partnerRaw?.settings
-          ? {
-              partner_visibility:
-                partnerRaw.settings
-                  ?.partner_visibility ===
-                  'summary' ||
-                partnerRaw.settings
-                  ?.partner_visibility ===
-                  'full'
-                  ? partnerRaw.settings
-                      .partner_visibility
-                  : 'private',
-
-              latest_period_start:
-                partnerRaw.settings
-                  ?.latest_period_start ??
-                null,
-
-              predicted_next_period:
-                partnerRaw.settings
-                  ?.predicted_next_period ??
-                null,
-
-              average_cycle_length:
-                Number(
-                  partnerRaw.settings
-                    ?.average_cycle_length
-                ) || 28,
-
-              average_period_length:
-                Number(
-                  partnerRaw.settings
-                    ?.average_period_length
-                ) || 5,
-            }
-          : undefined,
+        normalizePartnerSettings(
+          partnerRaw?.settings
+        ),
 
       periods:
         partnerPeriods,
@@ -874,6 +774,10 @@ export async function getPeriodDashboard(): Promise<PeriodDashboard> {
 // ============================================================
 // SAVE PERIOD SETTINGS
 // ============================================================
+//
+// Only actual cycle settings are saved.
+// There are NO privacy parameters anymore.
+// ============================================================
 
 export async function savePeriodSettings(
   settings: PeriodSettings
@@ -887,32 +791,11 @@ export async function savePeriodSettings(
       p_tracking_enabled:
         settings.tracking_enabled,
 
-      p_partner_visibility:
-        settings.partner_visibility,
-
       p_average_cycle_length:
         settings.average_cycle_length,
 
       p_average_period_length:
         settings.average_period_length,
-
-      /*
-       * These are included for the newer migration.
-       * If the RPC does not accept them yet, Supabase
-       * will return the exact RPC error instead of silently
-       * changing anything.
-       */
-      p_share_symptoms:
-        settings.share_symptoms ??
-        true,
-
-      p_share_mood:
-        settings.share_mood ??
-        true,
-
-      p_share_flow:
-        settings.share_flow ??
-        true,
     }
   );
 
@@ -929,9 +812,7 @@ export async function savePeriodSettings(
 
 export async function createPeriod(
   startDate: string,
-  endDate:
-    | string
-    | null,
+  endDate: string | null,
   notes: string = ''
 ) {
   const {
@@ -965,9 +846,7 @@ export async function createPeriod(
 export async function updatePeriod(
   id: string,
   startDate: string,
-  endDate:
-    | string
-    | null,
+  endDate: string | null,
   notes: string = ''
 ) {
   const {
@@ -976,7 +855,8 @@ export async function updatePeriod(
   } = await supabase.rpc(
     'update_period_log',
     {
-      p_id: id,
+      p_id:
+        id,
 
       p_start_date:
         startDate,
@@ -1009,7 +889,8 @@ export async function deletePeriod(
   } = await supabase.rpc(
     'delete_period_log',
     {
-      p_id: id,
+      p_id:
+        id,
     }
   );
 
@@ -1026,19 +907,10 @@ export async function deletePeriod(
 
 export type SavePeriodSymptomInput = {
   symptomDate: string;
-
   symptomType: string;
-
-  severity:
-    | SymptomSeverity;
-
-  mood?:
-    | string
-    | null;
-
-  energyLevel?:
-    | number
-    | null;
+  severity: SymptomSeverity;
+  mood?: string | null;
+  energyLevel?: number | null;
 };
 
 export async function savePeriodSymptom(
@@ -1060,12 +932,10 @@ export async function savePeriodSymptom(
         input.severity,
 
       p_mood:
-        input.mood ??
-        null,
+        input.mood ?? null,
 
       p_energy_level:
-        input.energyLevel ??
-        null,
+        input.energyLevel ?? null,
     }
   );
 
@@ -1089,7 +959,8 @@ export async function deletePeriodSymptom(
   } = await supabase.rpc(
     'delete_period_symptom',
     {
-      p_id: id,
+      p_id:
+        id,
     }
   );
 
@@ -1110,8 +981,7 @@ export function getSymptomsForDate(
 ): PeriodSymptom[] {
   return symptoms.filter(
     (symptom) =>
-      symptom.symptom_date ===
-      date
+      symptom.symptom_date === date
   );
 }
 
@@ -1142,13 +1012,11 @@ export function calculateAverageCycleLength(
     return 28;
   }
 
-  const intervals: number[] =
-    [];
+  const intervals: number[] = [];
 
   for (
     let i = 0;
-    i <
-    sorted.length - 1;
+    i < sorted.length - 1;
     i++
   ) {
     const current =
@@ -1182,8 +1050,7 @@ export function calculateAverageCycleLength(
       (sum, value) =>
         sum + value,
       0
-    ) /
-    intervals.length;
+    ) / intervals.length;
 
   return Math.round(
     average
@@ -1201,14 +1068,11 @@ export function calculatePeriodLength(
     return null;
   }
 
-  const difference =
+  return (
     daysBetween(
       period.start_date,
       period.end_date
-    );
-
-  return (
-    difference + 1
+    ) + 1
   );
 }
 
@@ -1217,12 +1081,8 @@ export function calculatePeriodLength(
 // ============================================================
 
 export function getSafeCycleDay(
-  latestStart:
-    | string
-    | null,
-  today:
-    | string
-    | null = getTodayString()
+  latestStart: string | null,
+  today: string | null = getTodayString()
 ): number | null {
   const day =
     getCycleDay(
@@ -1246,9 +1106,7 @@ export function getSafeCycleDay(
 
 export function isEstimatedFertileDate(
   date: string,
-  latestStart:
-    | string
-    | null,
+  latestStart: string | null,
   cycleLength: number
 ): boolean {
   const window =
@@ -1276,9 +1134,7 @@ export function isEstimatedFertileDate(
 
 export function isEstimatedOvulationDate(
   date: string,
-  latestStart:
-    | string
-    | null,
+  latestStart: string | null,
   cycleLength: number
 ): boolean {
   const ovulation =
@@ -1309,34 +1165,26 @@ export function formatPhase(
 
 export default {
   getPeriodDashboard,
-
   savePeriodSettings,
-
   createPeriod,
-
   updatePeriod,
-
   deletePeriod,
-
   savePeriodSymptom,
-
   deletePeriodSymptom,
-
   getCurrentCycleInfo,
-
+  getCycleInfoForDate,
   getCycleDay,
-
   getCyclePhase,
-
   getPredictedNextPeriod,
-
   getEstimatedOvulationDate,
-
   getFertileWindow,
-
   getLatestPeriod,
-
   getSymptomsForDate,
-
   getTodaySymptoms,
+  calculateAverageCycleLength,
+  calculatePeriodLength,
+  getSafeCycleDay,
+  isEstimatedFertileDate,
+  isEstimatedOvulationDate,
+  formatPhase,
 };
