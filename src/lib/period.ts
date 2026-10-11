@@ -188,6 +188,33 @@ export function getLatestPeriod(
   return sortPeriods(periods)[0] || null;
 }
 
+/**
+ * Partner dashboards may include a latest-period summary in settings even
+ * when the period log list is partial. Include that newer start date so both
+ * accounts compute the current phase from the same latest cycle anchor.
+ */
+export function includeLatestPeriodSummary(
+  periods: PeriodLog[],
+  latestPeriodStart: string | null | undefined
+): PeriodLog[] {
+  if (!latestPeriodStart) return periods;
+
+  const latestLoggedPeriod = getLatestPeriod(periods);
+  if (latestLoggedPeriod && latestLoggedPeriod.start_date >= latestPeriodStart) {
+    return periods;
+  }
+
+  return [
+    ...periods,
+    {
+      id: 'shared-summary',
+      start_date: latestPeriodStart,
+      end_date: null,
+      notes: null,
+    },
+  ];
+}
+
 export function getCycleDay(
   latestStart: string | null,
   today: string | null = getTodayString()
@@ -401,7 +428,7 @@ export function getCurrentCycleInfo(
   const phase = getCyclePhase(
     cycleDay,
     safeSettings.average_cycle_length,
-    safeSettings.average_period_length
+    calculatePeriodLength(latestPeriod) ?? safeSettings.average_period_length
   );
 
   const nextPeriod =
@@ -494,7 +521,7 @@ export function getCycleInfoForDate(
   const phase = getCyclePhase(
     cycleDay,
     cycleLength,
-    periodLength
+    calculatePeriodLength(anchor) ?? periodLength
   );
 
   return {
@@ -1179,6 +1206,7 @@ export default {
   getEstimatedOvulationDate,
   getFertileWindow,
   getLatestPeriod,
+  includeLatestPeriodSummary,
   getSymptomsForDate,
   getTodaySymptoms,
   calculateAverageCycleLength,

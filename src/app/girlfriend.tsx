@@ -31,6 +31,10 @@ import {
     SafeAreaView,
 } from 'react-native-safe-area-context';
 
+import RelationshipNotificationModal from '../components/RelationshipNotificationModal';
+import AnimatedCountBadge from '../components/AnimatedCountBadge';
+import { useUnreadNotificationCount } from '../hooks/use-unread-notification-count';
+
 // ============================================================
 // COLORS
 // Based directly on the Between Us landing page
@@ -168,6 +172,10 @@ export default function GirlfriendScreen() {
 
   const [loading, setLoading] =
     useState(true);
+
+  const [notifOpen, setNotifOpen] =
+    useState(false);
+  const unreadCount = useUnreadNotificationCount();
 
   const loadData =
     useCallback(
@@ -343,27 +351,67 @@ export default function GirlfriendScreen() {
         styles.safeArea
       }
     >
-      <ScrollView
-        contentContainerStyle={
-          styles.container
-        }
-        showsVerticalScrollIndicator={
-          false
+      {/* ====================================================
+          STICKY HEADER (FOLLOWS AS USER SCROLLS)
+      ===================================================== */}
+      <View
+        style={
+          styles.header
         }
       >
-
-        {/* ====================================================
-            HEADER
-        ===================================================== */}
+        <Pressable
+          onPress={() =>
+            router.back()
+          }
+          style={({ pressed }) => [
+            styles.headerButton,
+            pressed &&
+              styles.pressed,
+          ]}
+        >
+          <Feather
+            name="arrow-left"
+            size={21}
+            color={
+              COLORS.charcoal
+            }
+          />
+        </Pressable>
 
         <View
           style={
-            styles.header
+            styles.headerCenter
           }
         >
+          <Text
+            style={
+              styles.headerEyebrow
+            }
+          >
+            YOUR SPACE
+          </Text>
+
+          <Text
+            style={
+              styles.headerTitle
+            }
+          >
+            Girlfriend
+          </Text>
+        </View>
+
+        <View style={styles.headerRightGroup}>
+          <Pressable
+            onPress={() => router.push('/messages')}
+            style={({ pressed }) => [styles.headerButton, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Open messages"
+          >
+            <Feather name="message-circle" size={20} color={COLORS.charcoal} />
+          </Pressable>
           <Pressable
             onPress={() =>
-              router.back()
+              setNotifOpen(true)
             }
             style={({ pressed }) => [
               styles.headerButton,
@@ -372,35 +420,18 @@ export default function GirlfriendScreen() {
             ]}
           >
             <Feather
-              name="arrow-left"
-              size={21}
+              name="bell"
+              size={20}
               color={
-                COLORS.charcoal
+                COLORS.pink
               }
             />
+            <AnimatedCountBadge
+              count={unreadCount}
+              containerStyle={styles.bellBadge}
+              textStyle={styles.bellBadgeText}
+            />
           </Pressable>
-
-          <View
-            style={
-              styles.headerCenter
-            }
-          >
-            <Text
-              style={
-                styles.headerEyebrow
-              }
-            >
-              YOUR SPACE
-            </Text>
-
-            <Text
-              style={
-                styles.headerTitle
-              }
-            >
-              Girlfriend
-            </Text>
-          </View>
 
           <Pressable
             onPress={() =>
@@ -423,6 +454,16 @@ export default function GirlfriendScreen() {
             />
           </Pressable>
         </View>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={
+          styles.container
+        }
+        showsVerticalScrollIndicator={
+          false
+        }
+      >
 
         {/* ====================================================
             GREETING
@@ -473,9 +514,10 @@ export default function GirlfriendScreen() {
 
           <Pressable
             onPress={() =>
-              router.push(
-                '/period'
-              )
+              router.push({
+                pathname: '/period',
+                params: { role: 'girlfriend' },
+              })
             }
             hitSlop={10}
             style={({ pressed }) => [
@@ -495,9 +537,10 @@ export default function GirlfriendScreen() {
 
         <Pressable
           onPress={() =>
-            router.push(
-              '/period'
-            )
+            router.push({
+              pathname: '/period',
+              params: { role: 'girlfriend' },
+            })
           }
           style={({ pressed }) => [
             styles.cycleCard,
@@ -780,7 +823,7 @@ export default function GirlfriendScreen() {
         </Text>
 
         <Pressable
-          onPress={() => {}}
+          onPress={() => router.push('/check-in')}
           style={({ pressed }) => [
             styles.primaryCard,
             pressed &&
@@ -949,6 +992,15 @@ export default function GirlfriendScreen() {
         </Pressable>
 
       </ScrollView>
+
+      {/* RELATIONSHIP NOTIFICATIONS MODAL */}
+      <RelationshipNotificationModal
+        visible={notifOpen}
+        onClose={() => setNotifOpen(false)}
+        viewerMode={false}
+        partnerName={boyfriend?.name || 'Your partner'}
+        dashboard={dashboard}
+      />
     </SafeAreaView>
   );
 }
@@ -1097,14 +1149,43 @@ const styles =
     // ========================================================
 
     header: {
-      marginTop: 12,
-      height: 48,
+      paddingHorizontal: 20,
+      paddingVertical: 10,
       flexDirection:
         'row',
       alignItems:
         'center',
       justifyContent:
         'space-between',
+      backgroundColor: COLORS.background,
+      borderBottomWidth: 1,
+      borderBottomColor: '#F0E3E6',
+      zIndex: 50,
+    },
+
+    headerRightGroup: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+
+    bellBadge: {
+      position: 'absolute',
+      top: 1,
+      right: 1,
+      minWidth: 18,
+      height: 18,
+      paddingHorizontal: 4,
+      borderRadius: 9,
+      backgroundColor: COLORS.pink,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+    bellBadgeText: {
+      color: COLORS.white,
+      fontSize: 9,
+      fontWeight: '700',
     },
 
     headerButton: {

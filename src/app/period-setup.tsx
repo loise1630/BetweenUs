@@ -6,6 +6,7 @@ import {
     ActivityIndicator,
     Alert,
     KeyboardAvoidingView,
+    Modal,
     Platform,
     Pressable,
     ScrollView,
@@ -21,7 +22,7 @@ import {
     createPeriod,
     getPeriodDashboard,
     savePeriodSettings,
-    type PeriodVisibility,
+    updatePeriod,
 } from '../lib/period';
 
 const COLORS = {
@@ -81,28 +82,6 @@ const PERIOD_LENGTH_OPTIONS: PeriodLengthOption[] = [
   { label: '4–5 days', value: 5 },
   { label: '6–7 days', value: 7 },
   { label: '8+ days', value: 8 },
-];
-
-const VISIBILITY_OPTIONS: {
-  value: PeriodVisibility;
-  label: string;
-  detail: string;
-}[] = [
-  {
-    value: 'private',
-    label: 'Private',
-    detail: 'Only you can see your period details.',
-  },
-  {
-    value: 'summary',
-    label: 'Summary',
-    detail: 'Your partner can see useful cycle estimates.',
-  },
-  {
-    value: 'full',
-    label: 'Full',
-    detail: 'Share your cycle information with your partner.',
-  },
 ];
 
 function todayString() {
@@ -202,12 +181,24 @@ function getConfidence(
   regularity: Regularity
 ) {
   const lengths = cycleLengthsFromDates(history);
+  const variation = lengths.length
+    ? Math.max(...lengths) - Math.min(...lengths)
+    : Number.POSITIVE_INFINITY;
 
-  if (lengths.length >= 4 && regularity !== 'very_irregular') {
+  if (
+    lengths.length >= 4 &&
+    variation <= 3 &&
+    (regularity === 'very_regular' || regularity === 'regular')
+  ) {
     return 'High';
   }
 
-  if (lengths.length >= 2) {
+  if (
+    lengths.length >= 2 &&
+    variation <= 7 &&
+    regularity !== 'very_irregular' &&
+    regularity !== 'often_irregular'
+  ) {
     return 'Moderate';
   }
 
@@ -224,8 +215,12 @@ export default function PeriodSetupScreen() {
   const [checkingRole, setCheckingRole] = useState(true);
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [datePickerTarget, setDatePickerTarget] = useState<
+    'last' | 'lastEnd' | number | null
+  >(null);
 
   const [lastPeriod, setLastPeriod] = useState('');
+  const [lastPeriodEnd, setLastPeriodEnd] = useState('');
   const [periodLength, setPeriodLength] = useState(5);
   const [regularity, setRegularity] =
     useState<Regularity>('sometimes_irregular');
@@ -238,8 +233,6 @@ export default function PeriodSetupScreen() {
     '',
     '',
   ]);
-  const [visibility, setVisibility] =
-    useState<PeriodVisibility>('private');
 
   /*
    * IMPORTANT:
@@ -339,9 +332,20 @@ export default function PeriodSetupScreen() {
       if (!isValidDate(lastPeriod)) {
         Alert.alert(
           'Check the date',
-          'Enter the date your most recent period started using YYYY-MM-DD.'
+          'Choose the first day of your most recent period from the calendar.'
         );
 
+        return;
+      }
+
+      if (
+        lastPeriodEnd &&
+        (!isValidDate(lastPeriodEnd) || normalizeDate(lastPeriodEnd) < normalizeDate(lastPeriod))
+      ) {
+        Alert.alert(
+          'Check the end date',
+          'The end date must be the same day as or later than the start date.'
+        );
         return;
       }
     }
@@ -356,7 +360,7 @@ export default function PeriodSetupScreen() {
       if (invalid) {
         Alert.alert(
           'Check your dates',
-          'Use YYYY-MM-DD for each previous period you remember.'
+          'Choose a valid calendar date for each previous period you remember.'
         );
 
         return;
@@ -399,9 +403,21 @@ export default function PeriodSetupScreen() {
     if (!isValidDate(lastPeriod)) {
       Alert.alert(
         'Missing date',
-        'Please enter your most recent period start date.'
+        'Please choose your most recent period start date from the calendar.'
       );
 
+      setStep(1);
+      return;
+    }
+
+    if (
+      lastPeriodEnd &&
+      (!isValidDate(lastPeriodEnd) || normalizeDate(lastPeriodEnd) < normalizeDate(lastPeriod))
+    ) {
+      Alert.alert(
+        'Check the end date',
+        'The end date must be the same day as or later than the start date.'
+      );
       setStep(1);
       return;
     }
@@ -453,20 +469,23 @@ export default function PeriodSetupScreen() {
       const existing =
         await getPeriodDashboard();
 
-      const existingStarts =
-        new Set(
-          existing.own.periods.map(
-            (period) =>
-              period.start_date
-          )
-        );
-
       for (const date of cleanedHistory) {
-        if (!existingStarts.has(date)) {
-          await createPeriod(
-            date,
-            null,
-            ''
+        const existingPeriod = existing.own.periods.find(
+          (period) => period.start_date === date
+        );
+        const isMostRecent = date === normalizeDate(lastPeriod);
+        const endDate = isMostRecent && lastPeriodEnd
+          ? normalizeDate(lastPeriodEnd)
+          : null;
+
+        if (!existingPeriod) {
+          await createPeriod(date, endDate, '');
+        } else if (existingPeriod && endDate && existingPeriod.end_date !== endDate) {
+          await updatePeriod(
+            existingPeriod.id,
+            existingPeriod.start_date,
+            endDate,
+            existingPeriod.notes || ''
           );
         }
       }
@@ -481,15 +500,10 @@ export default function PeriodSetupScreen() {
 
       await savePeriodSettings({
         tracking_enabled: true,
-        partner_visibility:
-          visibility,
         average_cycle_length:
           selectedCycle,
         average_period_length:
           periodLength,
-        share_symptoms: true,
-        share_mood: true,
-        share_flow: true,
       });
 
       await AsyncStorage.setItem(
@@ -635,19 +649,24 @@ export default function PeriodSetupScreen() {
               icon="calendar"
               iconColor={COLORS.pink}
             >
-              <DateInput
+              <DatePickerField
                 value={lastPeriod}
-                onChangeText={
-                  setLastPeriod
-                }
-                placeholder="YYYY-MM-DD"
+                placeholder="Choose your most recent start date"
+                onPress={() => setDatePickerTarget('last')}
               />
-
-              <Text
-                style={styles.helper}
-              >
-                Example: 2026-09-18
-              </Text>
+              <View style={styles.optionalDateBlock}>
+                <View style={styles.optionalDateHeading}>
+                  <Text style={styles.optionalDateTitle}>When did it end?</Text>
+                  <Text style={styles.optionalTag}>OPTIONAL</Text>
+                </View>
+                <Text style={styles.optionalDateHint}>If you remember, this helps match the period phase to your actual dates. Leave it blank if you’re unsure.</Text>
+                <DatePickerField
+                  value={lastPeriodEnd}
+                  placeholder="Choose the last day of bleeding"
+                  onPress={() => setDatePickerTarget('lastEnd')}
+                  onClear={() => setLastPeriodEnd('')}
+                />
+              </View>
             </StepShell>
           )}
 
@@ -758,20 +777,12 @@ export default function PeriodSetupScreen() {
                     value,
                     index
                   ) => (
-                    <DateInput
+                    <DatePickerField
                       key={index}
                       value={value}
-                      onChangeText={(
-                        nextValue
-                      ) =>
-                        updateHistory(
-                          index,
-                          nextValue
-                        )
-                      }
-                      placeholder={`Previous period ${
-                        index + 1
-                      } · YYYY-MM-DD`}
+                      placeholder={`Choose previous start ${index + 1}`}
+                      onPress={() => setDatePickerTarget(index)}
+                      onClear={() => updateHistory(index, '')}
                     />
                   )
                 )}
@@ -882,45 +893,14 @@ export default function PeriodSetupScreen() {
 
           {step === 6 && (
             <StepShell
-              eyebrow="06 · PARTNER PRIVACY"
-              title="How much should your partner see?"
-              subtitle="You can change this later from your period tracker."
+              eyebrow="06 · READY TO TRACK"
+              title="Your cycle setup is ready."
+              subtitle="Your partner can view the shared cycle from their account."
               icon="lock"
               iconColor={
                 COLORS.lavender
               }
             >
-              <View
-                style={
-                  styles.optionList
-                }
-              >
-                {VISIBILITY_OPTIONS.map(
-                  (option) => (
-                    <Choice
-                      key={
-                        option.value
-                      }
-                      label={
-                        option.label
-                      }
-                      detail={
-                        option.detail
-                      }
-                      selected={
-                        visibility ===
-                        option.value
-                      }
-                      onPress={() =>
-                        setVisibility(
-                          option.value
-                        )
-                      }
-                    />
-                  )
-                )}
-              </View>
-
               <View
                 style={
                   styles.readyCard
@@ -1033,6 +1013,38 @@ export default function PeriodSetupScreen() {
           )}
         </View>
       </KeyboardAvoidingView>
+      <PeriodDatePicker
+        key={`${datePickerTarget ?? 'closed'}-${datePickerTarget === 'last'
+          ? lastPeriod
+          : datePickerTarget === 'lastEnd'
+            ? lastPeriodEnd
+          : typeof datePickerTarget === 'number'
+            ? history[datePickerTarget]
+            : ''}`}
+        visible={datePickerTarget !== null}
+        value={datePickerTarget === 'last'
+          ? lastPeriod
+          : datePickerTarget === 'lastEnd'
+            ? lastPeriodEnd
+          : typeof datePickerTarget === 'number'
+            ? history[datePickerTarget]
+            : ''}
+        minDate={datePickerTarget === 'lastEnd' && lastPeriod ? normalizeDate(lastPeriod) : undefined}
+        onClose={() => setDatePickerTarget(null)}
+        onSelect={(value) => {
+          if (datePickerTarget === 'last') {
+            setLastPeriod(value);
+            if (lastPeriodEnd && normalizeDate(lastPeriodEnd) < value) {
+              setLastPeriodEnd('');
+            }
+          } else if (datePickerTarget === 'lastEnd') {
+            setLastPeriodEnd(value);
+          } else if (typeof datePickerTarget === 'number') {
+            updateHistory(datePickerTarget, value);
+          }
+          setDatePickerTarget(null);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -1164,42 +1176,126 @@ function Choice({
   );
 }
 
-function DateInput({
+function formatDateLabel(value: string) {
+  if (!value) return '';
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+    month: 'long', day: 'numeric', year: 'numeric',
+  });
+}
+
+function DatePickerField({
   value,
-  onChangeText,
   placeholder,
+  onPress,
+  onClear,
 }: {
   value: string;
-  onChangeText: (value: string) => void;
   placeholder: string;
+  onPress: () => void;
+  onClear?: () => void;
 }) {
   return (
-    <View
-      style={styles.inputWrap}
-    >
+    <View style={styles.dateFieldWrap}>
       <Feather
         name="calendar"
         size={18}
-        color={COLORS.faint}
+        color={COLORS.pink}
       />
-
-      <TextInput
-        value={value}
-        onChangeText={
-          onChangeText
-        }
-        placeholder={
-          placeholder
-        }
-        placeholderTextColor={
-          COLORS.faint
-        }
-        keyboardType="numbers-and-punctuation"
-        maxLength={10}
-        autoCapitalize="none"
-        style={styles.input}
-      />
+      <Pressable onPress={onPress} style={styles.dateFieldButton} accessibilityRole="button">
+        <Text style={[styles.dateFieldText, !value && styles.dateFieldPlaceholder]}>
+          {value ? formatDateLabel(value) : placeholder}
+        </Text>
+      </Pressable>
+      {value && onClear ? (
+        <Pressable onPress={onClear} hitSlop={10} accessibilityLabel="Clear date">
+          <Feather name="x-circle" size={18} color={COLORS.faint} />
+        </Pressable>
+      ) : null}
     </View>
+  );
+}
+
+function PeriodDatePicker({
+  visible,
+  value,
+  minDate,
+  onClose,
+  onSelect,
+}: {
+  visible: boolean;
+  value: string;
+  minDate?: string;
+  onClose: () => void;
+  onSelect: (value: string) => void;
+}) {
+  const today = todayString();
+  const [shownMonth, setShownMonth] = useState(value.slice(0, 7) || today.slice(0, 7));
+
+  const [year, month] = shownMonth.split('-').map(Number);
+  const firstWeekday = new Date(year, month - 1, 1).getDay();
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const days = Array.from({ length: firstWeekday + daysInMonth }, (_, index) =>
+    index < firstWeekday ? '' : String(index - firstWeekday + 1).padStart(2, '0')
+  );
+  const monthTitle = new Date(year, month - 1, 1).toLocaleDateString(undefined, {
+    month: 'long', year: 'numeric',
+  });
+  const canGoForward = shownMonth < today.slice(0, 7);
+
+  const changeMonth = (amount: number) => {
+    const date = new Date(year, month - 1 + amount, 1);
+    setShownMonth(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`);
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.calendarOverlay}>
+        <Pressable style={styles.calendarBackdrop} onPress={onClose} />
+        <View style={styles.calendarSheet}>
+          <View style={styles.calendarTopRow}>
+            <Text style={styles.calendarTitle}>Choose a date</Text>
+            <Pressable onPress={onClose} hitSlop={10} accessibilityLabel="Close calendar">
+              <Feather name="x" size={22} color={COLORS.muted} />
+            </Pressable>
+          </View>
+          <View style={styles.calendarMonthRow}>
+            <Pressable onPress={() => changeMonth(-1)} style={styles.calendarArrow} accessibilityLabel="Previous month">
+              <Feather name="chevron-left" size={20} color={COLORS.text} />
+            </Pressable>
+            <Text style={styles.calendarMonth}>{monthTitle}</Text>
+            <Pressable onPress={() => canGoForward && changeMonth(1)} style={styles.calendarArrow} disabled={!canGoForward} accessibilityLabel="Next month">
+              <Feather name="chevron-right" size={20} color={canGoForward ? COLORS.text : COLORS.border} />
+            </Pressable>
+          </View>
+          <View style={styles.calendarGrid}>
+            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
+              <Text key={`${day}-${index}`} style={styles.calendarWeekday}>{day}</Text>
+            ))}
+            {days.map((day, index) => {
+              if (!day) return <View key={`blank-${index}`} style={styles.calendarCell} />;
+              const dateValue = `${shownMonth}-${day}`;
+              const disabled = dateValue > today || (!!minDate && dateValue < minDate);
+              const selected = dateValue === value;
+              return (
+                <Pressable
+                  key={dateValue}
+                  disabled={disabled}
+                  onPress={() => onSelect(dateValue)}
+                  style={[styles.calendarCell, selected && styles.calendarSelectedCell]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected, disabled }}
+                  accessibilityLabel={formatDateLabel(dateValue)}
+                >
+                  <Text style={[styles.calendarDay, selected && styles.calendarSelectedDay, disabled && styles.calendarDisabledDay]}>{Number(day)}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.calendarHint}>{minDate ? 'Choose the last day of bleeding. Dates before the start are unavailable.' : 'Select the first day of bleeding. Future dates are unavailable.'}</Text>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1427,6 +1523,158 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 11,
     marginBottom: 10,
+  },
+
+  dateFieldWrap: {
+    minHeight: 58,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.white,
+    paddingHorizontal: 17,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    marginBottom: 10,
+  },
+
+  optionalDateBlock: {
+    marginTop: 10,
+    padding: 14,
+    borderRadius: 20,
+    backgroundColor: '#FFF9FB',
+    borderWidth: 1,
+    borderColor: '#F6E4EB',
+  },
+  optionalDateHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  optionalDateTitle: { color: COLORS.text, fontSize: 13, fontWeight: '700' },
+  optionalTag: { color: COLORS.pink, fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
+  optionalDateHint: { marginBottom: 9, color: COLORS.muted, fontSize: 11, lineHeight: 16 },
+
+  dateFieldButton: {
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 56,
+  },
+
+  dateFieldText: {
+    fontSize: 15,
+    color: COLORS.text,
+  },
+
+  dateFieldPlaceholder: {
+    color: COLORS.faint,
+  },
+
+  calendarOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+
+  calendarBackdrop: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(18, 18, 23, 0.35)',
+  },
+
+  calendarSheet: {
+    backgroundColor: COLORS.background,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 22,
+    paddingTop: 22,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
+  },
+
+  calendarTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+
+  calendarTitle: {
+    fontSize: 19,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+
+  calendarMonthRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+
+  calendarMonth: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+
+  calendarArrow: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 20,
+    backgroundColor: COLORS.white,
+  },
+
+  calendarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+
+  calendarWeekday: {
+    width: '14.2857%',
+    height: 36,
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.faint,
+  },
+
+  calendarCell: {
+    width: '14.2857%',
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  calendarSelectedCell: {
+    borderRadius: 22,
+    backgroundColor: COLORS.pink,
+  },
+
+  calendarDay: {
+    fontSize: 14,
+    color: COLORS.text,
+  },
+
+  calendarSelectedDay: {
+    color: COLORS.white,
+    fontWeight: '700',
+  },
+
+  calendarDisabledDay: {
+    color: '#D3D7DE',
+  },
+
+  calendarHint: {
+    marginTop: 14,
+    textAlign: 'center',
+    fontSize: 12,
+    color: COLORS.faint,
   },
 
   input: {

@@ -83,6 +83,17 @@ export async function getPartnerMessages(): Promise<PartnerMessage[]> {
   );
 }
 
+export async function countPartnerMessagesSentSince(since: string): Promise<number> {
+  const { userId } = await getAccountAndPartner();
+  const { count, error } = await supabase
+    .from('partner_messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('sender_id', userId)
+    .gte('created_at', since);
+  if (error) throw error;
+  return count ?? 0;
+}
+
 /**
  * Send a message or reply to the paired partner.
  */
@@ -166,4 +177,45 @@ export async function markPartnerMessagesRead(
   if (error) {
     throw error;
   }
+
+  try {
+    const { data: alerts } = await supabase
+      .from('relationship_notifications')
+      .select('id')
+      .eq('recipient_id', userId)
+      .eq('source_table', 'partner_messages')
+      .in('source_id', ids);
+    const alertIds = (alerts ?? []).map((alert) => alert.id);
+    if (alertIds.length) {
+      await supabase.rpc('mark_relationship_notifications_read', { p_notification_ids: alertIds });
+    }
+  } catch (notificationError) {
+    console.warn('Could not synchronize message notification read state:', notificationError);
+  }
+}
+
+/** Subscribe to both directions of the current pair's message stream. */
+export async function subscribePartnerMessages(
+  onChange: () => void
+): Promise<() => void> {
+  const { userId } = await getAccountAndPartner();
+  const channel = supabase
+    .channel(`partner-messages:${userId}`)
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'partner_messages',
+      filter: `recipient_id=eq.${userId}`,
+    }, onChange)
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'partner_messages',
+      filter: `sender_id=eq.${userId}`,
+    }, onChange)
+    .subscribe();
+
+  return () => {
+    void supabase.removeChannel(channel);
+  };
 }

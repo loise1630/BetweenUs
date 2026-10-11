@@ -217,6 +217,23 @@ export default function SettingsScreen() {
           </Text>
         </View>
 
+        <Text style={styles.sectionLabel}>PREFERENCES</Text>
+        <View style={styles.card}>
+          <Pressable
+            onPress={() => router.push('/notification-settings')}
+            style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+          >
+            <View style={styles.iconCircle}>
+              <Ionicons name="notifications-outline" size={21} color="#856172" />
+            </View>
+            <View style={styles.rowContent}>
+              <Text style={styles.rowTitle}>Notifications</Text>
+              <Text style={styles.rowDescription}>Manage alerts and lock-screen privacy.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={19} color="#C2AAB4" />
+          </Pressable>
+        </View>
+
         {/* ACCOUNT SECTION */}
         <Text style={styles.sectionLabel}>
           ACCOUNT

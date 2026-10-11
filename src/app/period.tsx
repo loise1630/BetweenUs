@@ -12,8 +12,10 @@ import {
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   useWindowDimensions,
@@ -33,6 +35,7 @@ import {
   getPeriodDashboard,
   getPredictedNextPeriod,
   getTodaySymptoms,
+  includeLatestPeriodSummary,
   parseDate,
   PeriodDashboard,
   PeriodLog,
@@ -43,16 +46,22 @@ import {
 } from '../lib/period';
 
 import { getAccountState } from '../lib/account';
+import { CycleDailyLog, DailyStatus, getCycleDailyLogs, getDailyStatus, getSharedDailyWellness, saveCycleDailyLog, saveDailyStatus, saveSharedCravings, saveSharedDailyWellness, SharedDailyWellness, subscribeCycleFeatures } from '../lib/cycleFeatures';
+import { loadNotificationsModule, scheduleCycleReminders } from '../lib/pushNotifications';
 
 // ⚠️ Adjust these names if your partnerMessages.ts exports different ones.
 import {
   getPartnerMessages,
-  markPartnerMessagesRead,
   PartnerMessage,
   sendPartnerMessage,
+  subscribePartnerMessages,
 } from '../lib/partnerMessages';
 
-import { FadeIn, IconButton, PressScale, Screen } from '../lib/ui';
+import AnimatedCountBadge from '../components/AnimatedCountBadge';
+import CycleTabBar from '../components/CycleTabBar';
+import RelationshipNotificationModal from '../components/RelationshipNotificationModal';
+import { useUnreadNotificationCount } from '../hooks/use-unread-notification-count';
+import { FadeIn, PressScale, Screen } from '../lib/ui';
 
 const PHASE_IMAGES: Record<CyclePhase, any> = {
   Period: require('../../assets/images/menstrual.png'),
@@ -72,6 +81,7 @@ const ROUTES = {
   loveAboutYou: '/what-i-love',
   bucketList: '/bucket-list',
   checkIn: '/check-in',
+  betweenUs: '/between-us',
 };
 
 const C = {
@@ -95,6 +105,22 @@ const C = {
   yellow: '#E8B04B',
   yellowSoft: '#FBF1DB',
   line: '#F0E3E6',
+};
+
+// Daily Wellness overlay palette (soft dusty rose)
+const W = {
+  sheet: '#FDF4F5',
+  card: '#FFFFFF',
+  cardBorder: '#F8E6E9',
+  tile: '#FBEDEF',
+  tileActive: '#FADDE2',
+  tileActiveBorder: '#E9A2AE',
+  face: '#F5BBC3',
+  ink: '#4A2E3A',
+  inkSoft: '#7A5B67',
+  accent: '#E58C9C',
+  accentDeep: '#DE8697',
+  handle: '#E6C6CC',
 };
 
 type GradientStop = { at: number; color: string };
@@ -145,6 +171,8 @@ const PHASE_COPY: Record<
     accent: string;
     line1: string;
     line2: string;
+    partnerLine1: string;
+    partnerLine2: string;
   }
 > = {
   Period: {
@@ -153,6 +181,8 @@ const PHASE_COPY: Record<
     accent: C.pink,
     line1: 'Your body is renewing.',
     line2: 'Take it easy today.',
+    partnerLine1: 'Her body is renewing.',
+    partnerLine2: 'She may need extra rest today.',
   },
   Follicular: {
     title: 'Follicular',
@@ -160,6 +190,8 @@ const PHASE_COPY: Record<
     accent: C.green,
     line1: 'Your energy is building.',
     line2: 'A fresh start is here.',
+    partnerLine1: 'Her energy is building.',
+    partnerLine2: 'A fresh start is here.',
   },
   Ovulation: {
     title: 'Ovulation',
@@ -167,6 +199,8 @@ const PHASE_COPY: Record<
     accent: C.peach,
     line1: 'You may feel more energetic.',
     line2: 'Enjoy the extra energy.',
+    partnerLine1: 'Her energy may feel higher.',
+    partnerLine2: 'She may enjoy making plans.',
   },
   Luteal: {
     title: 'Luteal',
@@ -174,6 +208,8 @@ const PHASE_COPY: Record<
     accent: C.purple,
     line1: 'Time to slow down.',
     line2: 'Be gentle with yourself.',
+    partnerLine1: 'It may be time for her to slow down.',
+    partnerLine2: 'A little extra care can help.',
   },
 };
 
@@ -204,6 +240,16 @@ const BF_QUICK_MESSAGES = [
   'Want me to bring food?',
   'Rest well, babe',
 ];
+const WELLNESS_MOODS: { value: string; label: string }[] = [
+  { value: '😊', label: 'Great' },
+  { value: '😌', label: 'Calm' },
+  { value: '😔', label: 'Low' },
+  { value: '😟', label: 'Anxious' },
+  { value: '😤', label: 'Irritable' },
+  { value: '😶', label: 'Empty' },
+];
+const CRAVING_SUGGESTIONS = ['Chocolate', 'Salty snacks', 'Something sweet', 'Spicy food'];
+const TODAY_STATUSES = ['Need cuddles', 'Need space', 'Feeling great', 'Low energy'] as const;
 
 const MESSAGE_MAX = 280;
 
@@ -223,6 +269,7 @@ type NotificationItem = {
   unread: boolean;
   message: PartnerMessage;
 };
+type SupplementReminder = { id: string; name: string; time: string; notificationId?: string; takenDate?: string };
 
 function todayString() {
   const d = new Date();
@@ -242,32 +289,79 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
-function capitalize(value: string) {
-  return value ? value.charAt(0).toUpperCase() + value.slice(1) : '';
-}
-
-function timeAgo(value: string | null | undefined) {
-  if (!value) return '';
-  const then = new Date(value).getTime();
-  if (Number.isNaN(then)) return '';
-
-  const diff = Math.max(0, Date.now() - then);
-  const min = Math.floor(diff / 60000);
-
-  if (min < 1) return 'Just now';
-  if (min < 60) return `${min}m ago`;
-
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d ago`;
-
-  return new Date(value).toLocaleDateString(undefined, {
+function formatShortDate(value: string | null | undefined) {
+  if (!value) return '—';
+  return new Date(`${value}T12:00:00`).toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
   });
 }
+
+function formatPhaseDate(date: string, today: string) {
+  const distance = Math.max(0, Math.round(
+    (parseDate(date).getTime() - parseDate(today).getTime()) / 86400000
+  ));
+  const timing = distance === 0
+    ? 'today'
+    : distance === 1
+      ? 'tomorrow'
+      : distance <= 6
+        ? `in ${distance} days`
+        : distance <= 13
+          ? 'next week'
+          : `in ${distance} days`;
+  const shortDate = parseDate(date).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  });
+  return `${timing} · ${shortDate}`;
+}
+
+function getNextPhaseEstimate(
+  phase: CyclePhase,
+  ovulationDate: string | null,
+  nextPeriodDate: string | null,
+  latestPeriodStart: string | null,
+  latestPeriodEnd: string | null,
+  averagePeriodLength: number,
+  averageCycleLength: number,
+  today: string,
+) {
+  if (!latestPeriodStart) return null;
+
+  let nextPhase: CyclePhase;
+  let date: string | null;
+  switch (phase) {
+    case 'Period':
+      nextPhase = 'Follicular';
+      date = latestPeriodEnd
+        ? addDays(latestPeriodEnd, 1)
+        : addDays(latestPeriodStart, Math.max(1, averagePeriodLength));
+      break;
+    case 'Follicular':
+      nextPhase = 'Ovulation';
+      date = ovulationDate ? addDays(ovulationDate, -1) : null;
+      break;
+    case 'Ovulation':
+      nextPhase = 'Luteal';
+      date = ovulationDate ? addDays(ovulationDate, 2) : null;
+      break;
+    case 'Luteal':
+    default:
+      nextPhase = 'Period';
+      date = nextPeriodDate;
+      break;
+  }
+
+  if (!date) return null;
+  if (date <= today) date = addDays(date, Math.max(1, averageCycleLength));
+  return { phase: nextPhase, date, timing: formatPhaseDate(date, today) };
+}
+
+function capitalize(value: string) {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : '';
+}
+
 
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '');
@@ -348,7 +442,6 @@ function partnerHasData(data: PeriodDashboard | null) {
 export default function PeriodScreen() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-
   const [dashboard, setDashboard] = useState<PeriodDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -358,6 +451,7 @@ export default function PeriodScreen() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const [symptomModal, setSymptomModal] = useState(false);
+  const [logsModal, setLogsModal] = useState(false);
   const [symptomType, setSymptomType] = useState<string | null>(null);
   const [severity, setSeverity] = useState<SymptomSeverity>('mild');
   const [mood, setMood] = useState<string | null>(null);
@@ -367,27 +461,65 @@ export default function PeriodScreen() {
   const [myId, setMyId] = useState<string | null>(null);
   const [partnerName, setPartnerName] = useState('Your partner');
   const [notifOpen, setNotifOpen] = useState(false);
+  const relationshipUnreadCount = useUnreadNotificationCount();
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeText, setComposeText] = useState('');
   const [replyTo, setReplyTo] = useState<PartnerMessage | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [sharedWellnessLogs, setSharedWellnessLogs] = useState<SharedDailyWellness[]>([]);
+  const [dailyStatus, setDailyStatus] = useState<DailyStatus | null>(null);
+  const [statusOverlayVisible, setStatusOverlayVisible] = useState(false);
+  const [customStatus, setCustomStatus] = useState('');
+  const [wellnessTool, setWellnessTool] = useState<'daily' | 'cravings' | 'supplements' | null>(null);
+  const [dailyMood, setDailyMood] = useState<string | null>(null);
+  const [dailyEnergy, setDailyEnergy] = useState(3);
+  const [flowIntensity, setFlowIntensity] = useState<CycleDailyLog['flow_intensity']>(null);
+  const [cravingsText, setCravingsText] = useState('');
+  const [sleepHours, setSleepHours] = useState('');
+  const [waterGlasses, setWaterGlasses] = useState('0');
+  const [exerciseMinutes, setExerciseMinutes] = useState('0');
+  const [supplements, setSupplements] = useState<SupplementReminder[]>([]);
+  const [supplementName, setSupplementName] = useState('');
+  const [supplementTime, setSupplementTime] = useState('09:00');
+  const [cycleRemindersEnabled, setCycleRemindersEnabled] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
   const symptomsY = useRef(0);
-  const logsY = useRef(0);
 
   const floatAnim = useRef(new Animated.Value(0)).current;
   const popAnim = useRef(new Animated.Value(1)).current;
 
+  // Header animations
+  const headerIn = useRef(new Animated.Value(0)).current;
+  const bellWiggle = useRef(new Animated.Value(0)).current;
+  const scrollY = useRef(new Animated.Value(0)).current;
+
   const loadDashboard = useCallback(async () => {
+    let resolvedId: string | undefined;
     try {
+      const account = await getAccountState();
+      resolvedId = account.user_id;
       const data = await getPeriodDashboard();
       setDashboard(data);
+      const accountId = resolvedId || null;
+      const cacheKey = accountId ? `@betweenus_dashboard_v1_${accountId}` : null;
+      if (cacheKey) await AsyncStorage.setItem(cacheKey, JSON.stringify(data));
+      const isPartnerView = account.role === 'boyfriend';
+      const reminderPeriods = isPartnerView
+        ? includeLatestPeriodSummary(data.partner?.periods ?? [], data.partner?.settings?.latest_period_start ?? null)
+        : data.own.periods;
+      const reminderSettings = isPartnerView
+        ? { ...FALLBACK_SETTINGS, average_cycle_length: data.partner?.settings?.average_cycle_length || 28, average_period_length: data.partner?.settings?.average_period_length || 5 }
+        : data.own.settings;
+      const predicted = getPredictedNextPeriod(reminderPeriods, reminderSettings.average_cycle_length);
+      const current = getCurrentCycleInfo(reminderPeriods, reminderSettings);
+      void scheduleCycleReminders(predicted, current.fertileWindow.start, isPartnerView).catch((error) => console.warn('Could not schedule cycle reminders:', error));
     } catch (error: any) {
       console.error('PERIOD LOAD ERROR:', error);
-      Alert.alert(
-        'Unable to load period data',
-        error?.message || 'Please check your connection and try again.'
-      );
+      const cacheKey = resolvedId ? `@betweenus_dashboard_v1_${resolvedId}` : null;
+      const cached = cacheKey ? await AsyncStorage.getItem(cacheKey) : null;
+      if (cached) setDashboard(JSON.parse(cached));
+      else Alert.alert('Unable to load period data', error?.message || 'Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -411,24 +543,56 @@ export default function PeriodScreen() {
 
         try {
           const account: any = await getAccountState();
-          let role = detectRole(account);
           let preloaded: PeriodDashboard | null = null;
+          const accountRole = detectRole(account);
 
-          setMyId(account?.user_id || account?.id || null);
+          const accountId = account?.user_id || account?.id || null;
+          setMyId(accountId);
           setPartnerName(detectPartnerName(account));
+          if (accountId) {
+            setCycleRemindersEnabled((await AsyncStorage.getItem('@betweenus_cycle_reminders_enabled_v1')) === 'on');
+            const savedSupplements = await AsyncStorage.getItem(`@betweenus_supplements_v1_${accountId}`);
+            if (savedSupplements) setSupplements(JSON.parse(savedSupplements));
+            const [logs, status, sharedLogs] = await Promise.all([getCycleDailyLogs(accountId).catch(() => []), getDailyStatus().catch(() => null), getSharedDailyWellness().catch(() => [])]);
+            if (!mounted) return;
+            setDailyStatus(status);
+            setSharedWellnessLogs(sharedLogs);
+            const todayWellness = sharedLogs.find((log) => log.log_date === todayString());
+            if (todayWellness) {
+              setDailyMood(todayWellness.mood);
+              setDailyEnergy(todayWellness.energy_level ?? 3);
+              setFlowIntensity(todayWellness.flow_intensity);
+              setCravingsText(todayWellness.cravings.join(', '));
+            }
+            if (accountRole !== 'boyfriend') {
+              const todayLog = logs.find((log) => log.log_date === todayString());
+              if (todayLog) {
+                setSleepHours(todayLog.sleep_hours?.toString() ?? '');
+                setWaterGlasses(String(todayLog.water_glasses));
+                setExerciseMinutes(String(todayLog.exercise_minutes));
+              }
+            }
+          }
 
-          if (role === 'unknown') {
+          let isBoyfriend: boolean;
+          // The authenticated account is authoritative. Route params and a
+          // locally cached role can be stale and may show the wrong user's data.
+          if (accountRole === 'girlfriend') {
+            isBoyfriend = false;
+          } else if (accountRole === 'boyfriend') {
+            isBoyfriend = true;
+          } else {
             preloaded = await getPeriodDashboard();
-            role =
+            const role: 'boyfriend' | 'girlfriend' =
               partnerHasData(preloaded) &&
               (preloaded.own.periods?.length || 0) === 0
                 ? 'boyfriend'
                 : 'girlfriend';
+            isBoyfriend = role === 'boyfriend';
           }
 
           if (!mounted) return;
 
-          const isBoyfriend = role === 'boyfriend';
           setViewerMode(isBoyfriend);
 
           if (!isBoyfriend) {
@@ -469,14 +633,24 @@ export default function PeriodScreen() {
 
       void boot();
 
-      // Refresh messages every 30s while this screen is focused
-      const interval = setInterval(() => {
-        void loadMessages();
-      }, 30000);
+      let unsubscribeMessages: (() => void) | undefined;
+      let unsubscribeFeatures: (() => void) | undefined;
+      void subscribePartnerMessages(() => { void loadMessages(); }).then((unsubscribe) => {
+        if (mounted) unsubscribeMessages = unsubscribe;
+        else unsubscribe();
+      }).catch((error) => console.warn('Message realtime unavailable:', error));
+      void subscribeCycleFeatures(() => {
+        void getSharedDailyWellness().then(setSharedWellnessLogs).catch(() => undefined);
+        void getDailyStatus().then(setDailyStatus).catch(() => undefined);
+      }).then((unsubscribe) => {
+        if (mounted) unsubscribeFeatures = unsubscribe;
+        else unsubscribe();
+      }).catch((error) => console.warn('Cycle realtime unavailable:', error));
 
       return () => {
         mounted = false;
-        clearInterval(interval);
+        unsubscribeMessages?.();
+        unsubscribeFeatures?.();
       };
     }, [loadDashboard, loadMessages])
   );
@@ -492,19 +666,10 @@ export default function PeriodScreen() {
 
   const partnerLatestStart = partnerSettings?.latest_period_start ?? null;
 
-  const partnerPeriods: PeriodLog[] =
-    partnerPeriodsRaw.length > 0
-      ? partnerPeriodsRaw
-      : partnerLatestStart
-        ? [
-            {
-              id: 'shared-summary',
-              start_date: partnerLatestStart,
-              end_date: null,
-              notes: null,
-            },
-          ]
-        : [];
+  const partnerPeriods = includeLatestPeriodSummary(
+    partnerPeriodsRaw,
+    partnerLatestStart
+  );
 
   const periods: PeriodLog[] = viewerMode ? partnerPeriods : ownPeriods;
   const symptoms = viewerMode ? partnerSymptoms : ownSymptoms;
@@ -536,10 +701,7 @@ export default function PeriodScreen() {
 
   const currentCycle = getCurrentCycleInfo(periods, settings);
 
-  const stripStart =
-    latestPeriod && currentCycle.cycleDay && currentCycle.cycleDay <= 10
-      ? latestPeriod.start_date
-      : today;
+  const stripStart = today;
 
   const stripDates = Array.from({ length: 10 }, (_, i) =>
     addDays(stripStart, i)
@@ -552,17 +714,29 @@ export default function PeriodScreen() {
         ? today
         : stripDates[0];
 
-  const activeInfo = getCycleInfoForDate(periods, settings, activeDate);
+  // The hero always reports the current cycle phase. Calendar cells remain
+  // date-specific, so selecting another day cannot make the two accounts'
+  // current-phase cards disagree.
+  const activeInfo = currentCycle;
   const activePhase: CyclePhase = activeInfo.phase || 'Period';
   const shownPhase: CyclePhase = hasCycleData ? activePhase : 'Period';
   const activeCopy = PHASE_COPY[shownPhase];
   const theme = PHASE_THEME[shownPhase];
   const accent = activeCopy.accent;
 
-  const predictedNext =
-    viewerMode && partnerSettings?.predicted_next_period
-      ? partnerSettings.predicted_next_period
-      : getPredictedNextPeriod(periods, cycleLength);
+  const predictedNext = getPredictedNextPeriod(periods, cycleLength);
+  const nextPhaseEstimate = hasCycleData
+    ? getNextPhaseEstimate(
+        currentCycle.phase,
+        currentCycle.ovulationDate,
+        predictedNext,
+        latestPeriod?.start_date || null,
+        latestPeriod?.end_date || null,
+        periodLength,
+        cycleLength,
+        today,
+      )
+    : null;
 
   const todaySymptoms = getTodaySymptoms(symptoms);
 
@@ -641,9 +815,55 @@ export default function PeriodScreen() {
     popImage();
   }, [activeDate, shownPhase, popImage]);
 
+  // Header title entrance
+  useEffect(() => {
+    Animated.timing(headerIn, {
+      toValue: 1,
+      duration: 520,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [headerIn]);
+
+  // Bell wiggles every few seconds while there are unread notifications
+  useEffect(() => {
+    if (relationshipUnreadCount <= 0) {
+      bellWiggle.setValue(0);
+      return;
+    }
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(bellWiggle, { toValue: 1, duration: 90, useNativeDriver: true }),
+        Animated.timing(bellWiggle, { toValue: -1, duration: 140, useNativeDriver: true }),
+        Animated.timing(bellWiggle, { toValue: 1, duration: 140, useNativeDriver: true }),
+        Animated.timing(bellWiggle, { toValue: -1, duration: 140, useNativeDriver: true }),
+        Animated.timing(bellWiggle, { toValue: 0, duration: 90, useNativeDriver: true }),
+        Animated.delay(3800),
+      ])
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [bellWiggle, relationshipUnreadCount]);
+
   const floatY = floatAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0, -7],
+  });
+
+  const headerTitleY = headerIn.interpolate({
+    inputRange: [0, 1],
+    outputRange: [6, 0],
+  });
+
+  const bellRotate = bellWiggle.interpolate({
+    inputRange: [-1, 1],
+    outputRange: ['-16deg', '16deg'],
+  });
+
+  const headerHairlineOpacity = scrollY.interpolate({
+    inputRange: [0, 28],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
   });
 
   function scrollTo(y: number) {
@@ -658,8 +878,116 @@ export default function PeriodScreen() {
   }
 
   async function refresh() {
-    setLoading(true);
-    await loadDashboard();
+    setRefreshing(true);
+    await Promise.all([loadDashboard(), loadMessages(), getSharedDailyWellness().then(setSharedWellnessLogs).catch(() => undefined), getDailyStatus().then(setDailyStatus).catch(() => undefined)]);
+    setRefreshing(false);
+  }
+
+  async function saveDailyLog() {
+    if (viewerMode || saving) return;
+    try {
+      setSaving(true);
+      await saveCycleDailyLog({
+        log_date: today,
+        mood: dailyMood,
+        energy_level: dailyEnergy,
+        flow_intensity: activePhase === 'Period' ? flowIntensity : null,
+        cravings: cravingsText.split(',').map((item) => item.trim()).filter(Boolean),
+        sleep_hours: sleepHours ? Number(sleepHours) : null,
+        water_glasses: Math.max(0, Number(waterGlasses) || 0),
+        exercise_minutes: Math.max(0, Number(exerciseMinutes) || 0),
+      });
+      await saveSharedDailyWellness({
+        log_date: today,
+        mood: dailyMood,
+        energy_level: dailyEnergy,
+        flow_intensity: activePhase === 'Period' ? flowIntensity : null,
+        cravings: cravingsText.split(',').map((item) => item.trim()).filter(Boolean),
+      });
+      setSharedWellnessLogs(await getSharedDailyWellness());
+      Alert.alert('Saved', 'Your daily log has been saved.');
+    } catch (error: any) {
+      Alert.alert('Could not save daily log', error?.message || 'Please try again.');
+    } finally { setSaving(false); }
+  }
+
+  async function saveCravings() {
+    if (viewerMode || saving) return;
+    try {
+      setSaving(true);
+      const cravings = cravingsText.split(',').map((item) => item.trim()).filter(Boolean);
+      await saveSharedCravings(cravings, today);
+      setSharedWellnessLogs(await getSharedDailyWellness());
+      Alert.alert('Saved', "Today's cravings have been shared with your partner.");
+    } catch (error: any) {
+      Alert.alert('Could not save cravings', error?.message || 'Please try again.');
+    } finally { setSaving(false); }
+  }
+
+  async function chooseDailyStatus(status: string) {
+    if (viewerMode || saving) return;
+    setSaving(true);
+    setDailyStatus({ user_id: myId || '', log_date: today, status, updated_at: new Date().toISOString() });
+    try {
+      await saveDailyStatus(status, today);
+      setStatusOverlayVisible(false);
+      setCustomStatus('');
+    } catch (error: any) {
+      Alert.alert('Could not update status', error?.message || 'Please try again.');
+      void getDailyStatus().then(setDailyStatus);
+    } finally { setSaving(false); }
+  }
+
+  async function addSupplementReminder() {
+    const name = supplementName.trim();
+    const match = /^(\d{1,2}):(\d{2})$/.exec(supplementTime.trim());
+    if (!name || !match || Number(match[1]) > 23 || Number(match[2]) > 59) {
+      Alert.alert('Check the reminder', 'Add a supplement name and time in 24-hour HH:MM format.');
+      return;
+    }
+    try {
+      const Notifications = await loadNotificationsModule();
+      if (!Notifications) throw new Error('Local reminders are unavailable in this build.');
+      if (Platform.OS === 'android') await Notifications.setNotificationChannelAsync('supplement-reminders', { name: 'Supplement reminders', importance: Notifications.AndroidImportance.DEFAULT });
+      let permission = await Notifications.getPermissionsAsync();
+      if (permission.status !== 'granted') permission = await Notifications.requestPermissionsAsync();
+      if (permission.status !== 'granted') throw new Error('Allow notifications in device settings to set reminders.');
+      const notificationId = await Notifications.scheduleNotificationAsync({
+        content: { title: 'Supplement reminder', body: `Time to take ${name}.`, ...(Platform.OS === 'android' ? { channelId: 'supplement-reminders' } : {}) },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.CALENDAR, hour: Number(match[1]), minute: Number(match[2]), repeats: true },
+      });
+      const next = [...supplements, { id: `${Date.now()}`, name, time: supplementTime.trim(), notificationId }];
+      setSupplements(next);
+      if (myId) await AsyncStorage.setItem(`@betweenus_supplements_v1_${myId}`, JSON.stringify(next));
+      setSupplementName('');
+    } catch (error: any) { Alert.alert('Could not set reminder', error?.message || 'Please try again.'); }
+  }
+
+  async function toggleSupplementTaken(id: string) {
+    const next = supplements.map((item) => item.id === id ? { ...item, takenDate: item.takenDate === today ? undefined : today } : item);
+    setSupplements(next);
+    if (myId) await AsyncStorage.setItem(`@betweenus_supplements_v1_${myId}`, JSON.stringify(next));
+  }
+
+  async function toggleCycleReminders(enabled: boolean) {
+    if (enabled) {
+      const Notifications = await loadNotificationsModule();
+      if (!Notifications) { Alert.alert('Reminders unavailable', 'Local notifications are unavailable on this platform.'); return; }
+      if (Platform.OS === 'android') await Notifications.setNotificationChannelAsync('cycle-reminders', { name: 'Cycle reminders', importance: Notifications.AndroidImportance.DEFAULT });
+      let permission = await Notifications.getPermissionsAsync();
+      if (permission.status !== 'granted') permission = await Notifications.requestPermissionsAsync();
+      if (permission.status !== 'granted') { Alert.alert('Notifications are off', 'Allow notifications in device settings to receive cycle reminders.'); return; }
+      await AsyncStorage.setItem('@betweenus_cycle_reminders_enabled_v1', 'on');
+      setCycleRemindersEnabled(true);
+      await refresh();
+      return;
+    }
+    await AsyncStorage.setItem('@betweenus_cycle_reminders_enabled_v1', 'off');
+    setCycleRemindersEnabled(false);
+    const Notifications = await loadNotificationsModule();
+    const ids = JSON.parse((await AsyncStorage.getItem('@betweenus_cycle_reminder_ids_v1')) || '[]') as string[];
+    if (Notifications) for (const id of ids) await Notifications.cancelScheduledNotificationAsync(id).catch(() => undefined);
+    await AsyncStorage.removeItem('@betweenus_cycle_reminder_ids_v1');
   }
 
   /* MESSAGES */
@@ -699,35 +1027,6 @@ export default function PeriodScreen() {
     }
   }
 
-  async function markRead(ids: string[]) {
-    if (ids.length === 0) return;
-
-    setMessages((prev) =>
-      prev.map((m) =>
-        ids.includes(String(m.id))
-          ? { ...m, read_at: m.read_at || new Date().toISOString() }
-          : m
-      )
-    );
-
-    try {
-      await markPartnerMessagesRead(ids);
-    } catch (error) {
-      console.error('MARK READ ERROR:', error);
-    }
-  }
-
-  async function markAllRead() {
-    const ids = notifications.filter((n) => n.unread).map((n) => n.id);
-    await markRead(ids);
-  }
-
-  function openNotification(item: NotificationItem) {
-    if (item.unread) void markRead([item.id]);
-
-    setNotifOpen(false);
-    setTimeout(() => openCompose(item.message), 300);
-  }
 
   /* PERIOD ACTIONS */
 
@@ -917,57 +1216,79 @@ export default function PeriodScreen() {
       <View style={styles.root}>
         <SoftGradient stops={theme.stops} />
 
-        <ScrollView
-          ref={scrollRef}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={[
-            styles.container,
-            { paddingBottom: 120 + insets.bottom },
-          ]}
-        >
-          {/* HEADER */}
-          <FadeIn style={styles.header}>
+        {/* SLIM STICKY HEADER */}
+        <View style={[styles.stickyHeader, { paddingTop: insets.top }]}>
+          <View style={styles.headerRow}>
             <View style={styles.headerTitleGroup}>
               {router.canGoBack?.() ? (
-                <IconButton name="arrow-back" onPress={() => router.back()} />
+                <PressScale
+                  onPress={() => router.back()}
+                  scaleTo={0.88}
+                  style={styles.headerBack}
+                  contentStyle={styles.headerBackContent}
+                >
+                  <Ionicons name="chevron-back" size={20} color={theme.ink} />
+                </PressScale>
               ) : null}
 
-              <View style={styles.headerTextGroup}>
-                <Text style={[styles.eyebrow, { color: theme.ink }]}>
-                  BETWEEN US
-                </Text>
+              <Animated.View
+                style={[
+                  styles.headerTextGroup,
+                  { opacity: headerIn, transform: [{ translateY: headerTitleY }] },
+                ]}
+              >
                 <Text style={[styles.headerTitle, { color: theme.ink }]}>
-                  {viewerMode ? 'Her cycle' : 'Your cycle'}
+                  {viewerMode ? 'Her Period' : 'My Period'}
                 </Text>
-                <Text style={styles.headerSubtitle}>
-                  Small steps, big care.
-                </Text>
-              </View>
+              </Animated.View>
             </View>
 
             <PressScale
               onPress={() => setNotifOpen(true)}
-              style={styles.headerCalendar}
-              contentStyle={styles.headerCalendarContent}
+              scaleTo={0.88}
+              style={styles.headerBell}
+              contentStyle={styles.headerBellContent}
             >
-              <Ionicons
-                name={
-                  unreadCount > 0 ? 'notifications' : 'notifications-outline'
-                }
-                size={22}
-                color={theme.ink}
+              <Animated.View style={{ transform: [{ rotate: bellRotate }] }}>
+                <Ionicons
+                  name={
+                    relationshipUnreadCount > 0 ? 'notifications' : 'notifications-outline'
+                  }
+                  size={20}
+                  color={theme.ink}
+                />
+              </Animated.View>
+              <AnimatedCountBadge
+                count={relationshipUnreadCount}
+                containerStyle={styles.bellBadge}
+                textStyle={styles.bellBadgeText}
               />
-              {unreadCount > 0 ? (
-                <View style={styles.bellBadge}>
-                  <Text style={styles.bellBadgeText}>
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </Text>
-                </View>
-              ) : null}
             </PressScale>
-          </FadeIn>
+          </View>
 
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.headerHairline, { opacity: headerHairlineOpacity }]}
+          />
+        </View>
+
+        <ScrollView
+          ref={scrollRef}
+          style={styles.mainScroll}
+          showsVerticalScrollIndicator={false}
+          scrollEventThrottle={16}
+          onScroll={(event) => scrollY.setValue(event.nativeEvent.contentOffset.y)}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void refresh(); }} tintColor={C.pink} colors={[C.pink]} />}
+          contentContainerStyle={[
+            styles.container,
+            { paddingBottom: 24 + insets.bottom, paddingTop: 6 },
+          ]}
+        >
           {/* DATE STRIP */}
+          <View style={styles.todayDateBlock}>
+            <Text style={styles.todayDateLabel}>Date Today</Text>
+            <Text style={styles.todayDateValue}>{parseDate(today).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}</Text>
+          </View>
           <FadeIn delay={40}>
             <ScrollView
               horizontal
@@ -977,10 +1298,7 @@ export default function PeriodScreen() {
               {stripDates.map((date) => {
                 const active = date === activeDate;
                 const info = getCycleInfoForDate(periods, settings, date);
-                const number =
-                  hasCycleData && info.cycleDay
-                    ? String(info.cycleDay)
-                    : String(parseDate(date).getDate());
+                const number = String(parseDate(date).getDate());
                 const isPeriodDay = hasCycleData && info.phase === 'Period';
 
                 return (
@@ -1069,7 +1387,7 @@ export default function PeriodScreen() {
               </View>
 
               <Text style={[styles.heroEyebrow, { color: theme.ink }]}>
-                MENSTRUAL CYCLE PHASE
+                {viewerMode ? 'HER CYCLE PHASE' : 'MENSTRUAL CYCLE PHASE'}
               </Text>
 
               <Text style={[styles.heroPhase, { color: theme.ink }]}>
@@ -1086,11 +1404,19 @@ export default function PeriodScreen() {
 
               <Text style={[styles.heroDescription, { color: theme.ink }]}>
                 {hasCycleData
-                  ? `${PHASE_COPY[activePhase].line1}\n${PHASE_COPY[activePhase].line2}`
+                  ? viewerMode
+                    ? `${PHASE_COPY[activePhase].partnerLine1}\n${PHASE_COPY[activePhase].partnerLine2}`
+                    : `${PHASE_COPY[activePhase].line1}\n${PHASE_COPY[activePhase].line2}`
                   : viewerMode
-                    ? 'Her cycle information will appear here once she logs a period.'
+                    ? 'She hasn’t logged yet. Send a gentle reminder?'
                     : 'Log your first period to begin tracking.'}
               </Text>
+
+              {viewerMode && !hasCycleData ? (
+                <Pressable style={styles.outlineButton} onPress={() => { setComposeText('When you have a moment, could you add your period dates? I want to support you.'); setReplyTo(null); setComposeOpen(true); }}>
+                  <Text style={styles.outlineButtonText}>Send a gentle reminder</Text>
+                </Pressable>
+              ) : null}
 
               {!viewerMode ? (
                 <PressScale
@@ -1107,10 +1433,69 @@ export default function PeriodScreen() {
             </View>
           </FadeIn>
 
+          {/* CYCLE OVERVIEW — minimalist */}
+          <FadeIn delay={110}>
+            <View style={styles.overviewHeading}>
+              <Text style={styles.overviewTitle}>Cycle overview</Text>
+            </View>
+
+            <View style={styles.overviewCard}>
+              <View style={styles.overviewStats}>
+                <OverviewStat
+                  icon="calendar-outline"
+                  label="Next period"
+                  value={formatShortDate(predictedNext)}
+                  color={C.pink}
+                />
+                <View style={styles.overviewVDivider} />
+                <OverviewStat
+                  icon="repeat-outline"
+                  label="Cycle"
+                  value={`${cycleLength} days`}
+                  color={C.purple}
+                />
+                <View style={styles.overviewVDivider} />
+                <OverviewStat
+                  icon="water-outline"
+                  label="Period"
+                  value={`${displayPeriodLength} days`}
+                  color={C.peach}
+                />
+              </View>
+
+              <View style={styles.overviewDivider} />
+
+              <View style={styles.overviewRow}>
+                <Ionicons name="sparkles-outline" size={14} color={C.purple} />
+                <Text style={styles.overviewRowText} numberOfLines={1}>
+                  {nextPhaseEstimate
+                    ? `Next: ${nextPhaseEstimate.phase} · ${nextPhaseEstimate.timing}`
+                    : viewerMode
+                      ? 'Her next phase appears once she logs a period.'
+                      : 'Log a period to see your next phase.'}
+                </Text>
+              </View>
+
+              <View style={styles.overviewRow}>
+                <Ionicons name="notifications-outline" size={14} color={C.muted} />
+                <Text style={[styles.overviewRowText, { color: C.muted }]} numberOfLines={1}>
+                  Cycle reminders
+                </Text>
+                <Switch
+                  value={cycleRemindersEnabled}
+                  onValueChange={(value) => { void toggleCycleReminders(value); }}
+                  trackColor={{ true: '#F7B7C3' }}
+                  thumbColor={cycleRemindersEnabled ? C.pink : '#FFFFFF'}
+                  style={styles.overviewSwitch}
+                />
+              </View>
+            </View>
+          </FadeIn>
+
           {/* QUICK FEATURE ROW — HORIZONTAL */}
-          <FadeIn delay={130}>
+          <FadeIn delay={150}>
             <View style={styles.sectionHeading}>
-              <Text style={styles.sectionTitle}>Your tools</Text>
+              <Text style={styles.sectionTitle}>Your Tools</Text>
               <Text style={styles.sectionHint}>Swipe to explore</Text>
             </View>
 
@@ -1122,7 +1507,7 @@ export default function PeriodScreen() {
             >
               <FeatureCard
                 title="Calendar"
-                subtitle="Your cycle at a glance"
+                subtitle={viewerMode ? 'Her cycle at a glance' : 'Your cycle at a glance'}
                 icon="calendar-outline"
                 color={C.peach}
                 background={C.peachSoft}
@@ -1146,25 +1531,23 @@ export default function PeriodScreen() {
 
               <FeatureCard
                 title="Period Logs"
-                subtitle="Your period history"
+                subtitle={viewerMode ? 'Her period history' : 'Your period history'}
                 icon="time-outline"
                 color={C.pink}
                 background={C.pinkSoft}
-                onPress={() => scrollTo(logsY.current)}
+                onPress={() => setLogsModal(true)}
               />
             </ScrollView>
           </FadeIn>
 
-          {/* TODAY: RELATIONSHIP FEATURES — HORIZONTAL */}
-          <FadeIn delay={180}>
+          {/* TODAY: QUICK ACTIONS */}
+          <FadeIn delay={190}>
             <View style={styles.sectionHeading}>
-              <Text style={styles.sectionTitle}>Between Us</Text>
+              <Text style={styles.sectionTitle}>Today</Text>
               <Text style={styles.todayCaption}>
                 {unreadCount > 0
                   ? `${unreadCount} new message${unreadCount === 1 ? '' : 's'}`
-                  : todaySymptoms.length > 0
-                    ? `${todaySymptoms.length} symptom update${todaySymptoms.length === 1 ? '' : 's'}`
-                    : 'A little space for the two of you'}
+                  : 'Small ways to stay connected today'}
               </Text>
             </View>
 
@@ -1175,25 +1558,16 @@ export default function PeriodScreen() {
               contentContainerStyle={styles.todayScroller}
             >
               <RelationshipCard
-                title="Want"
+                title="Today’s Want"
                 subtitle={
                   viewerMode
-                    ? "See what she'd love."
-                    : "Tell him what you'd love."
+                    ? "Add a little thing you’d love her to do."
+                    : "Add something you’d love him to do."
                 }
                 icon="heart"
                 background={C.pinkSoft}
                 color={C.pink}
                 onPress={() => openRoute(ROUTES.want)}
-              />
-
-              <RelationshipCard
-                title="Unsaid"
-                subtitle="Things you can't say directly."
-                icon="chatbubble-ellipses"
-                background={C.purpleSoft}
-                color={C.purple}
-                onPress={() => openRoute(ROUTES.unsaid)}
               />
 
               <RelationshipCard
@@ -1211,78 +1585,301 @@ export default function PeriodScreen() {
               />
 
               <RelationshipCard
-                title="Little Things"
-                subtitle={
-                  viewerMode
-                    ? 'Small ways to make her day.'
-                    : 'Small things that make you smile.'
-                }
-                icon="sparkles"
-                background={C.yellowSoft}
-                color={C.yellow}
-                onPress={() => openRoute(ROUTES.littleThings)}
-              />
-
-              <RelationshipCard
-                title="What I love about you"
-                subtitle={
-                  viewerMode
-                    ? 'Tell her what you adore.'
-                    : 'Tell him what you adore.'
-                }
-                icon="rose"
-                background={C.peachSoft}
-                color={C.peach}
-                onPress={() => openRoute(ROUTES.loveAboutYou)}
-              />
-
-              <RelationshipCard
-                title="Our Bucket Lists"
-                subtitle="Dreams and plans, together."
-                icon="compass"
-                background={C.greenSoft}
-                color={C.green}
-                onPress={() => openRoute(ROUTES.bucketList)}
-              />
-
-              <RelationshipCard
                 title="Check-in"
-                subtitle="How are you feeling about your partner?"
+                subtitle="Share today’s feeling or mood."
                 icon="pulse"
                 background={C.blueSoft}
                 color={C.blue}
                 onPress={() => openRoute(ROUTES.checkIn)}
               />
-            </ScrollView>
-          </FadeIn>
-
-          {/* CYCLE SUMMARY */}
-          <FadeIn delay={220}>
-            <View style={styles.sectionHeading}>
-              <Text style={styles.sectionTitle}>Cycle overview</Text>
-            </View>
-
-            <View style={styles.summaryRow}>
-              <SummaryCard
-                icon="calendar-outline"
-                label="Next expected"
-                value={formatDate(predictedNext)}
-                color={C.pink}
-              />
-              <SummaryCard
-                icon="repeat-outline"
-                label="Cycle length"
-                value={`${cycleLength} days`}
+              <RelationshipCard
+                title="Status"
+                subtitle={viewerMode ? dailyStatus?.status ?? "She hasn't logged yet." : dailyStatus?.status ?? "Set today's status."}
+                icon="pulse"
+                background={C.purpleSoft}
                 color={C.purple}
+                onPress={() => { if (!viewerMode) setStatusOverlayVisible(true); }}
               />
-              <SummaryCard
-                icon="water-outline"
-                label="Period length"
-                value={`${displayPeriodLength} days`}
-                color={C.peach}
-              />
-            </View>
+            </ScrollView>
+
+
           </FadeIn>
+
+          <View style={styles.wellnessSection}>
+              <View style={styles.sectionHeading}><Text style={styles.sectionTitle}>Wellness</Text></View>
+              <View style={styles.wellnessActions}>
+                <Pressable style={styles.wellnessAction} onPress={() => setWellnessTool('daily')} accessibilityRole="button">
+                  <View style={[styles.wellnessActionIcon, { backgroundColor: C.purpleSoft }]}><Ionicons name="heart-outline" size={17} color={C.purple} /></View>
+                  <Text style={styles.wellnessActionTitle}>Daily{ '\n' }Wellness</Text>
+                </Pressable>
+                <Pressable style={styles.wellnessAction} onPress={() => setWellnessTool('cravings')} accessibilityRole="button">
+                  <View style={[styles.wellnessActionIcon, { backgroundColor: C.pinkSoft }]}><Ionicons name="restaurant-outline" size={17} color={C.pink} /></View>
+                  <Text style={styles.wellnessActionTitle}>Cravings</Text>
+                </Pressable>
+                {!viewerMode ? <Pressable style={styles.wellnessAction} onPress={() => setWellnessTool('supplements')} accessibilityRole="button">
+                  <View style={[styles.wellnessActionIcon, { backgroundColor: C.peachSoft }]}><Ionicons name="medical-outline" size={17} color={C.peach} /></View>
+                  <Text style={styles.wellnessActionTitle}>Pills &{ '\n' }Supplements</Text>
+                </Pressable> : null}
+              </View>
+          </View>
+
+          {/* WELLNESS OVERLAY — compact floating card */}
+          <Modal
+            visible={wellnessTool !== null && (!viewerMode || wellnessTool !== 'supplements')}
+            transparent
+            animationType="slide"
+            onRequestClose={() => setWellnessTool(null)}
+          >
+            <KeyboardAvoidingView
+              style={styles.modalRoot}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+              <Pressable style={styles.modalBackdrop} onPress={() => setWellnessTool(null)} />
+              <View style={[styles.wellSheet, { marginBottom: Math.max(insets.bottom, 12) }]}>
+                <View style={styles.wellHandle} />
+
+                <View style={styles.wellHeader}>
+                  <Pressable onPress={() => setWellnessTool(null)} style={styles.wellClose} accessibilityRole="button" accessibilityLabel="Close wellness" hitSlop={10}>
+                    <Ionicons name="close" size={20} color={W.accent} />
+                  </Pressable>
+                  <View style={styles.wellHeaderCenter}>
+                    <Text style={styles.wellTitle}>
+                      {wellnessTool === 'daily' ? 'Daily Wellness' : wellnessTool === 'cravings' ? 'Cravings' : 'Pills & Supplements'}
+                    </Text>
+                    <Text style={styles.wellSubtitle}>
+                      {viewerMode
+                        ? 'Shared from her daily log.'
+                        : wellnessTool === 'supplements'
+                          ? 'Private reminders for your routine.'
+                          : wellnessTool === 'cravings'
+                            ? 'Let your partner know what you want.'
+                            : 'How are you feeling today?'}
+                      {!viewerMode && wellnessTool === 'daily' ? ' ' : ''}
+                      {!viewerMode && wellnessTool === 'daily' ? <Ionicons name="heart-outline" size={12} color={W.accent} /> : null}
+                    </Text>
+                  </View>
+                  <View style={styles.wellClose} />
+                </View>
+
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={styles.wellScroll}
+                >
+                  {wellnessTool === 'daily' ? (
+                    viewerMode ? (() => {
+                      const todayWellness = sharedWellnessLogs.find((log) => log.log_date === todayString());
+                      return (
+                        <>
+                          <View style={styles.wellCard}>
+                            {todayWellness ? (
+                              <>
+                                <Text style={styles.sharedWellnessValue}>Mood · {todayWellness.mood || 'Not logged'}</Text>
+                                <Text style={styles.sharedWellnessValue}>Energy · {todayWellness.energy_level ?? 'Not logged'} / 5</Text>
+                                {todayWellness.flow_intensity ? <Text style={styles.sharedWellnessValue}>Flow · {capitalize(todayWellness.flow_intensity)}</Text> : null}
+                              </>
+                            ) : (
+                              <Text style={styles.dailyCaption}>She hasn&apos;t logged wellness today.</Text>
+                            )}
+                          </View>
+                          <View style={styles.wellCard}>
+                            <Text style={styles.wellCardTitle}>History</Text>
+                            {sharedWellnessLogs.length
+                              ? sharedWellnessLogs.slice(0, 7).map((log) => (
+                                  <Text key={log.log_date} style={styles.dailyHistory}>
+                                    {log.log_date} · {log.mood || 'No mood'} · energy {log.energy_level ?? '-'}
+                                    {log.flow_intensity ? ` · ${log.flow_intensity} flow` : ''}
+                                  </Text>
+                                ))
+                              : <Text style={styles.dailyCaption}>Daily wellness history will appear here.</Text>}
+                          </View>
+                        </>
+                      );
+                    })() : (
+                      <>
+                        {/* MOOD */}
+                        <View style={styles.wellCard}>
+                          <View style={styles.wellCardHeader}>
+                            <View style={styles.wellCardIcon}><Ionicons name="happy-outline" size={16} color={W.accent} /></View>
+                            <Text style={styles.wellCardTitle}>Mood</Text>
+                          </View>
+                          <View style={styles.moodGrid}>
+                            {WELLNESS_MOODS.map((item) => {
+                              const active = dailyMood === item.value;
+                              return (
+                                <Pressable
+                                  key={item.value}
+                                  onPress={() => setDailyMood(item.value)}
+                                  style={[styles.moodTile, active && styles.moodTileActive]}
+                                  accessibilityRole="button"
+                                  accessibilityState={{ selected: active }}
+                                >
+                                  <View style={styles.moodFace}><Text style={styles.moodFaceEmoji}>{item.value}</Text></View>
+                                  <Text style={[styles.moodLabel, active && styles.moodLabelActive]}>{item.label}</Text>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+                        </View>
+
+                        {/* ENERGY */}
+                        <View style={styles.wellCard}>
+                          <View style={styles.wellCardHeader}>
+                            <Ionicons name="flash-outline" size={20} color={W.accent} />
+                            <Text style={styles.wellCardTitle}>Energy: {dailyEnergy}/5</Text>
+                          </View>
+                          <View style={styles.energyRow}>
+                            {[1, 2, 3, 4, 5].map((value) => {
+                              const active = dailyEnergy === value;
+                              return (
+                                <Pressable
+                                  key={value}
+                                  onPress={() => setDailyEnergy(value)}
+                                  style={[styles.energyCircle, active && styles.energyCircleActive]}
+                                  accessibilityRole="button"
+                                  accessibilityState={{ selected: active }}
+                                >
+                                  <Text style={[styles.energyText, active && styles.energyTextActive]}>{value}</Text>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+                        </View>
+
+                        {/* FLOW */}
+                        {activePhase === 'Period' ? (
+                          <View style={styles.wellCard}>
+                            <View style={styles.wellCardHeader}>
+                              <Ionicons name="water-outline" size={20} color={W.accent} />
+                              <Text style={styles.wellCardTitle}>Flow Intensity</Text>
+                            </View>
+                            <View style={styles.flowRow}>
+                              {(['light', 'medium', 'heavy'] as const).map((value) => {
+                                const active = flowIntensity === value;
+                                return (
+                                  <Pressable
+                                    key={value}
+                                    onPress={() => setFlowIntensity(value)}
+                                    style={[styles.flowPill, active && styles.flowPillActive]}
+                                    accessibilityRole="button"
+                                    accessibilityState={{ selected: active }}
+                                  >
+                                    <Text style={[styles.flowText, active && styles.flowTextActive]}>{capitalize(value)}</Text>
+                                  </Pressable>
+                                );
+                              })}
+                            </View>
+                          </View>
+                        ) : null}
+
+                        <Pressable
+                          onPress={() => void saveDailyLog()}
+                          disabled={saving}
+                          style={[styles.wellSave, saving && styles.primaryButtonDisabled]}
+                          accessibilityRole="button"
+                        >
+                          <Ionicons name="bookmark-outline" size={18} color={C.white} />
+                          <Text style={styles.wellSaveText}>{saving ? 'Saving...' : "Save today's wellness"}</Text>
+                        </Pressable>
+
+                        {sharedWellnessLogs.length ? (
+                          <View style={styles.wellCard}>
+                            <Text style={styles.wellCardTitle}>History</Text>
+                            {sharedWellnessLogs.slice(0, 5).map((log) => (
+                              <Text key={log.log_date} style={styles.dailyHistory}>
+                                {log.log_date} · {log.mood || 'No mood'} · energy {log.energy_level ?? '-'}
+                                {log.flow_intensity ? ` · ${log.flow_intensity} flow` : ''}
+                              </Text>
+                            ))}
+                          </View>
+                        ) : null}
+                      </>
+                    )
+                  ) : null}
+
+                  {wellnessTool === 'cravings' ? (
+                    viewerMode ? (
+                      <View style={styles.wellCard}>
+                        {sharedWellnessLogs.filter((log) => log.cravings.length > 0).slice(0, 7).map((log) => (
+                          <View key={log.log_date} style={styles.cravingHistoryRow}>
+                            <Text style={styles.dailyLabel}>{log.log_date}</Text>
+                            <Text style={styles.sharedWellnessValue}>{log.cravings.join(', ')}</Text>
+                          </View>
+                        ))}
+                        {!sharedWellnessLogs.some((log) => log.cravings.length > 0) ? <Text style={styles.dailyCaption}>She hasn&apos;t shared any cravings yet.</Text> : null}
+                      </View>
+                    ) : (
+                      <>
+                        <View style={styles.wellCard}>
+                          <View style={styles.wellCardHeader}>
+                            <View style={styles.wellCardIcon}><Ionicons name="restaurant-outline" size={16} color={W.accent} /></View>
+                            <Text style={styles.wellCardTitle}>Suggestions</Text>
+                          </View>
+                          <View style={styles.dailyChipWrap}>
+                            {CRAVING_SUGGESTIONS.map((craving) => (
+                              <Pressable
+                                key={craving}
+                                onPress={() => {
+                                  const current = cravingsText.split(',').map((item) => item.trim()).filter(Boolean);
+                                  if (!current.includes(craving)) setCravingsText([...current, craving].join(', '));
+                                }}
+                                style={styles.wellChip}
+                              >
+                                <Text style={styles.wellChipText}>{craving}</Text>
+                              </Pressable>
+                            ))}
+                          </View>
+                          <TextInput
+                            value={cravingsText}
+                            onChangeText={setCravingsText}
+                            placeholder="Add a craving"
+                            placeholderTextColor={C.faint}
+                            style={styles.wellInput}
+                            maxLength={240}
+                          />
+                        </View>
+                        <Pressable onPress={() => void saveCravings()} disabled={saving} style={[styles.wellSave, saving && styles.primaryButtonDisabled]}>
+                          <Ionicons name="bookmark-outline" size={18} color={C.white} />
+                          <Text style={styles.wellSaveText}>{saving ? 'Saving...' : "Share today's cravings"}</Text>
+                        </Pressable>
+                      </>
+                    )
+                  ) : null}
+
+                  {wellnessTool === 'supplements' && !viewerMode ? (
+                    <>
+                      <View style={styles.wellCard}>
+                        <View style={styles.wellCardHeader}>
+                          <View style={styles.wellCardIcon}><Ionicons name="medical-outline" size={16} color={W.accent} /></View>
+                          <Text style={styles.wellCardTitle}>New reminder</Text>
+                        </View>
+                        <View style={styles.dailyInputRow}>
+                          <TextInput value={supplementName} onChangeText={setSupplementName} placeholder="Birth control, iron, vitamins" placeholderTextColor={C.faint} style={[styles.wellInput, { flex: 1 }]} />
+                          <TextInput value={supplementTime} onChangeText={setSupplementTime} placeholder="09:00" placeholderTextColor={C.faint} style={[styles.wellInput, { width: 76 }]} />
+                        </View>
+                      </View>
+                      <Pressable onPress={() => void addSupplementReminder()} style={styles.wellSave}>
+                        <Ionicons name="alarm-outline" size={18} color={C.white} />
+                        <Text style={styles.wellSaveText}>Add daily reminder</Text>
+                      </Pressable>
+                      {supplements.length ? (
+                        <View style={styles.wellCard}>
+                          {supplements.map((item) => (
+                            <View key={item.id} style={styles.supplementRow}>
+                              <Text style={[styles.dailyHistory, { flex: 1, borderTopWidth: 0 }]}>{item.name} · {item.time}</Text>
+                              <Pressable onPress={() => void toggleSupplementTaken(item.id)} style={[styles.takenButton, item.takenDate === today && styles.takenButtonActive]}>
+                                <Text style={[styles.choiceText, item.takenDate === today && styles.choiceTextActive]}>{item.takenDate === today ? 'Taken' : 'Mark taken'}</Text>
+                              </Pressable>
+                            </View>
+                          ))}
+                        </View>
+                      ) : null}
+                    </>
+                  ) : null}
+                </ScrollView>
+              </View>
+            </KeyboardAvoidingView>
+          </Modal>
 
           {/* SYMPTOMS */}
           <View
@@ -1369,110 +1966,21 @@ export default function PeriodScreen() {
             )}
           </View>
 
-          {/* PERIOD LOGS: COMPACT LIST */}
-          <View
-            onLayout={(event) => {
-              logsY.current = event.nativeEvent.layout.y;
-            }}
-          >
-            <View style={styles.sectionHeading}>
-              <Text style={styles.sectionTitle}>Period Logs</Text>
-              <Text style={styles.sectionHint}>
-                {periods.length} entr{periods.length === 1 ? 'y' : 'ies'}
-              </Text>
-            </View>
-
-            {periods.length === 0 ? (
-              <View style={styles.emptyCard}>
-                <View style={styles.emptyIcon}>
-                  <Ionicons
-                    name="time-outline"
-                    size={23}
-                    color={C.pink}
-                  />
-                </View>
-                <Text style={styles.emptyCardTitle}>No period logs yet</Text>
-                <Text style={styles.emptyCardDescription}>
-                  {viewerMode
-                    ? 'Her period history will appear here once she logs a period.'
-                    : 'Your saved period entries will appear here.'}
-                </Text>
-                {!viewerMode ? (
-                  <Pressable
-                    onPress={editPeriod}
-                    style={styles.outlineButton}
-                  >
-                    <Text style={styles.outlineButtonText}>Log a period</Text>
-                  </Pressable>
-                ) : null}
+          <View>
+            <PressScale
+              onPress={() => openRoute(ROUTES.betweenUs)}
+              style={styles.betweenUsButton}
+              contentStyle={styles.betweenUsButtonContent}
+            >
+              <View style={styles.betweenUsIcon}>
+                <Ionicons name="people-outline" size={20} color={C.purple} />
               </View>
-            ) : (
-              <View style={styles.logsCard}>
-                {periods.slice(0, 3).map((period, index) => (
-                  <View
-                    key={period.id}
-                    style={[
-                      styles.logRow,
-                      index < Math.min(periods.length, 3) - 1 &&
-                        styles.logRowBorder,
-                    ]}
-                  >
-                    <View style={styles.logDateIcon}>
-                      <Ionicons
-                        name="calendar-outline"
-                        size={19}
-                        color={C.pink}
-                      />
-                    </View>
-
-                    <View style={styles.logText}>
-                      <Text style={styles.logTitle}>
-                        {formatDate(period.start_date)}
-                      </Text>
-                      <Text style={styles.logSubtitle}>
-                        {period.end_date
-                          ? `Ended ${formatDate(period.end_date)}`
-                          : period.start_date === latestPeriod?.start_date
-                            ? 'Current or ongoing period'
-                            : 'End date not recorded'}
-                      </Text>
-                    </View>
-
-                    {!viewerMode && period.id !== 'shared-summary' ? (
-                      <Pressable
-                        onPress={() => deleteOwnPeriod(period)}
-                        hitSlop={10}
-                        style={styles.deleteButton}
-                      >
-                        <Ionicons
-                          name="trash-outline"
-                          size={17}
-                          color={C.faint}
-                        />
-                      </Pressable>
-                    ) : null}
-                  </View>
-                ))}
-
-                {periods.length > 3 ? (
-                  <View style={styles.moreLogs}>
-                    <Text style={styles.moreLogsText}>
-                      Showing 3 of {periods.length} entries
-                    </Text>
-                    <Pressable
-                      onPress={() =>
-                        Alert.alert(
-                          'Period Logs',
-                          `There are ${periods.length} saved entries. The full history page can be added next.`
-                        )
-                      }
-                    >
-                      <Text style={styles.moreLogsLink}>View all</Text>
-                    </Pressable>
-                  </View>
-                ) : null}
+              <View style={styles.betweenUsButtonCopy}>
+                <Text style={styles.betweenUsButtonTitle}>Between Us</Text>
+                <Text style={styles.betweenUsButtonSubtitle}>Little ways to feel closer, together</Text>
               </View>
-            )}
+              <Ionicons name="chevron-forward" size={19} color={C.muted} />
+            </PressScale>
           </View>
 
           {!viewerMode ? (
@@ -1491,35 +1999,53 @@ export default function PeriodScreen() {
           ) : null}
         </ScrollView>
 
-        {/* BOTTOM NAVIGATION */}
-        <View
-          style={[
-            styles.tabBar,
-            { paddingBottom: Math.max(insets.bottom, 14) + 4 },
-          ]}
+        <CycleTabBar active="home" />
+
+        <Modal
+          visible={statusOverlayVisible && !viewerMode}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setStatusOverlayVisible(false)}
         >
-          <TabItem
-            label="Home"
-            icon="home"
-            active
-            color={accent}
-            onPress={() =>
-              scrollRef.current?.scrollTo({ y: 0, animated: true })
-            }
-          />
-          <TabItem
-            label="Calendar"
-            icon="calendar-outline"
-            color={accent}
-            onPress={() => openRoute(ROUTES.calendar)}
-          />
-          <TabItem
-            label="Insights"
-            icon="bar-chart-outline"
-            color={accent}
-            onPress={() => openRoute(ROUTES.insights)}
-          />
-        </View>
+          <View style={styles.statusOverlayRoot}>
+            <Pressable style={styles.modalBackdrop} onPress={() => setStatusOverlayVisible(false)} />
+            <View style={styles.statusOverlayCard}>
+              <Text style={styles.sheetTitle}>Today&apos;s status</Text>
+              <Text style={styles.sheetSubtitle}>Pick a suggestion or write your own.</Text>
+              <View style={[styles.dailyChipWrap, styles.statusSuggestionWrap]}>
+                {TODAY_STATUSES.map((status) => (
+                  <Pressable
+                    key={status}
+                    disabled={saving}
+                    onPress={() => void chooseDailyStatus(status)}
+                    style={[styles.choiceChip, dailyStatus?.status === status && styles.choiceChipActive]}
+                  >
+                    <Text style={[styles.choiceText, dailyStatus?.status === status && styles.choiceTextActive]}>{status}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <TextInput
+                value={customStatus}
+                onChangeText={setCustomStatus}
+                placeholder="Or write your own status"
+                maxLength={60}
+                returnKeyType="done"
+                onSubmitEditing={() => { if (customStatus.trim()) void chooseDailyStatus(customStatus.trim()); }}
+                style={styles.dailyInput}
+              />
+              <Pressable
+                onPress={() => void chooseDailyStatus(customStatus.trim())}
+                disabled={saving || !customStatus.trim()}
+                style={[styles.dailySave, (!customStatus.trim() || saving) && styles.primaryButtonDisabled]}
+              >
+                <Text style={styles.dailySaveText}>{saving ? 'Saving...' : 'Save status'}</Text>
+              </Pressable>
+              <Pressable onPress={() => setStatusOverlayVisible(false)} style={styles.cancelButton}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
 
         {/* SYMPTOM MODAL */}
         <Modal
@@ -1571,7 +2097,7 @@ export default function PeriodScreen() {
                 ) : null}
 
                 <Text style={styles.sheetLabel}>Choose a symptom</Text>
-                <View style={styles.chipWrap}>
+                <View style={styles.dailyChipWrap}>
                   {SYMPTOM_OPTIONS.map((option) => (
                     <Pressable
                       key={option}
@@ -1594,7 +2120,7 @@ export default function PeriodScreen() {
                 </View>
 
                 <Text style={styles.sheetLabel}>Severity</Text>
-                <View style={styles.chipWrap}>
+                <View style={styles.dailyChipWrap}>
                   {SEVERITY_OPTIONS.map((option) => (
                     <Pressable
                       key={option}
@@ -1617,7 +2143,7 @@ export default function PeriodScreen() {
                 </View>
 
                 <Text style={styles.sheetLabel}>Mood (optional)</Text>
-                <View style={styles.chipWrap}>
+                <View style={styles.dailyChipWrap}>
                   {MOOD_OPTIONS.map((option) => (
                     <Pressable
                       key={option}
@@ -1660,127 +2186,93 @@ export default function PeriodScreen() {
           </View>
         </Modal>
 
-        {/* NOTIFICATIONS MODAL */}
+        {/* PERIOD LOGS POPUP */}
         <Modal
-          visible={notifOpen}
+          visible={logsModal}
           transparent
           animationType="slide"
-          onRequestClose={() => setNotifOpen(false)}
+          onRequestClose={() => setLogsModal(false)}
         >
           <View style={styles.modalRoot}>
-            <Pressable
-              style={styles.modalBackdrop}
-              onPress={() => setNotifOpen(false)}
-            />
-
+            <Pressable style={styles.modalBackdrop} onPress={() => setLogsModal(false)} />
             <View style={styles.sheet}>
               <View style={styles.sheetHandle} />
-
-              <ScrollView
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.sheetScroll}
-              >
-                <View style={styles.notifHeader}>
-                  <View>
-                    <Text style={styles.sheetTitle}>Notifications</Text>
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetScroll}>
+                <View style={styles.logsModalHeader}>
+                  <View style={styles.logsModalTitleGroup}>
+                    <Text style={styles.sheetTitle}>{viewerMode ? 'Her Period Logs' : 'My Period Logs'}</Text>
                     <Text style={styles.sheetSubtitle}>
-                      {unreadCount > 0
-                        ? `${unreadCount} unread`
-                        : "You're all caught up"}
+                      {periods.length} entr{periods.length === 1 ? 'y' : 'ies'}
                     </Text>
                   </View>
-
-                  {unreadCount > 0 ? (
-                    <Pressable onPress={markAllRead} style={styles.smallAction}>
-                      <Ionicons name="checkmark-done" size={15} color={C.pink} />
-                      <Text style={styles.smallActionText}>Mark all read</Text>
-                    </Pressable>
-                  ) : null}
+                  <Pressable onPress={() => setLogsModal(false)} style={styles.closeButton} accessibilityRole="button" accessibilityLabel="Close period logs">
+                    <Ionicons name="close" size={21} color={C.muted} />
+                  </Pressable>
                 </View>
 
-                {notifications.length === 0 ? (
-                  <View style={[styles.emptyCard, { marginTop: 22 }]}>
+                {periods.length === 0 ? (
+                  <View style={styles.logsEmpty}>
                     <View style={styles.emptyIcon}>
-                      <Ionicons
-                        name="notifications-outline"
-                        size={23}
-                        color={C.pink}
-                      />
+                      <Ionicons name="time-outline" size={23} color={C.pink} />
                     </View>
-                    <Text style={styles.emptyCardTitle}>No notifications yet</Text>
+                    <Text style={styles.emptyCardTitle}>No period logs yet</Text>
                     <Text style={styles.emptyCardDescription}>
-                      Messages and replies from {partnerName} will show up here.
+                      {viewerMode
+                        ? 'Her period history will appear here once she logs a period.'
+                        : 'Your saved period entries will appear here.'}
                     </Text>
+                    {!viewerMode ? (
+                      <Pressable
+                        onPress={() => { setLogsModal(false); editPeriod(); }}
+                        style={styles.outlineButton}
+                      >
+                        <Text style={styles.outlineButtonText}>Log a period</Text>
+                      </Pressable>
+                    ) : null}
                   </View>
                 ) : (
-                  <View style={styles.notifList}>
-                    {notifications.map((item, index) => (
-                      <Pressable
-                        key={item.id}
-                        onPress={() => openNotification(item)}
-                        style={[
-                          styles.notifRow,
-                          item.unread && styles.notifRowUnread,
-                          index < notifications.length - 1 &&
-                            styles.notifRowGap,
-                        ]}
-                      >
-                        <View
-                          style={[
-                            styles.notifIcon,
-                            {
-                              backgroundColor:
-                                item.kind === 'reply' ? C.blueSoft : C.pinkSoft,
-                            },
-                          ]}
-                        >
-                          <Ionicons
-                            name={
-                              item.kind === 'reply'
-                                ? 'return-up-back'
-                                : 'mail'
-                            }
-                            size={18}
-                            color={item.kind === 'reply' ? C.blue : C.pink}
-                          />
+                  <View style={styles.logsCard}>
+                    {periods.map((period, index) => (
+                      <View key={period.id} style={[styles.logRow, index < periods.length - 1 && styles.logRowBorder]}>
+                        <View style={styles.logDateIcon}>
+                          <Ionicons name="calendar-outline" size={19} color={C.pink} />
                         </View>
-
-                        <View style={styles.notifText}>
-                          <Text style={styles.notifTitle} numberOfLines={1}>
-                            {item.title}
-                          </Text>
-
-                          {item.quoted ? (
-                            <Text style={styles.notifQuoted} numberOfLines={1}>
-                              You: {item.quoted}
-                            </Text>
-                          ) : null}
-
-                          <Text style={styles.notifBody} numberOfLines={2}>
-                            {item.body}
-                          </Text>
-
-                          <Text style={styles.notifTime}>
-                            {timeAgo(item.createdAt)} · Tap to reply
+                        <View style={styles.logText}>
+                          <Text style={styles.logTitle}>{formatDate(period.start_date)}</Text>
+                          <Text style={styles.logSubtitle}>
+                            {period.end_date
+                              ? `Ended ${formatDate(period.end_date)}`
+                              : period.start_date === latestPeriod?.start_date
+                                ? 'Current or ongoing period'
+                                : 'End date not recorded'}
                           </Text>
                         </View>
-
-                        {item.unread ? <View style={styles.unreadDot} /> : null}
-                      </Pressable>
+                        {!viewerMode && period.id !== 'shared-summary' ? (
+                          <Pressable onPress={() => deleteOwnPeriod(period)} hitSlop={10} style={styles.deleteButton} accessibilityRole="button" accessibilityLabel="Delete period log">
+                            <Ionicons name="trash-outline" size={17} color={C.faint} />
+                          </Pressable>
+                        ) : null}
+                      </View>
                     ))}
                   </View>
                 )}
-
-                <Pressable
-                  onPress={() => setNotifOpen(false)}
-                  style={styles.cancelButton}
-                >
+                <Pressable onPress={() => setLogsModal(false)} style={styles.cancelButton}>
                   <Text style={styles.cancelButtonText}>Close</Text>
                 </Pressable>
               </ScrollView>
             </View>
           </View>
         </Modal>
+
+        {/* RELATIONSHIP NOTIFICATIONS MODAL */}
+        <RelationshipNotificationModal
+          visible={notifOpen}
+          onClose={() => setNotifOpen(false)}
+          viewerMode={viewerMode}
+          partnerName={partnerName}
+          dashboard={dashboard}
+          onOpenCompose={(target) => openCompose(target || null)}
+        />
 
         {/* COMPOSE / REPLY MODAL */}
         <Modal
@@ -1823,7 +2315,7 @@ export default function PeriodScreen() {
                 ) : (
                   <>
                     <Text style={styles.sheetLabel}>Quick messages</Text>
-                    <View style={styles.chipWrap}>
+                    <View style={styles.dailyChipWrap}>
                       {quickMessages.map((option) => (
                         <Pressable
                           key={option}
@@ -1998,7 +2490,7 @@ function RelationshipCard({
   );
 }
 
-function SummaryCard({
+function OverviewStat({
   icon,
   label,
   value,
@@ -2010,40 +2502,13 @@ function SummaryCard({
   color: string;
 }) {
   return (
-    <View style={styles.summaryCard}>
-      <Ionicons name={icon} size={18} color={color} />
-      <Text style={styles.summaryLabel}>{label}</Text>
-      <Text style={styles.summaryValue} numberOfLines={2}>
-        {value}
-      </Text>
+    <View style={styles.overviewStat}>
+      <Ionicons name={icon} size={15} color={color} />
+      <View style={styles.overviewStatCopy}>
+        <Text style={styles.overviewStatLabel} numberOfLines={1}>{label}</Text>
+        <Text style={styles.overviewStatValue} numberOfLines={1}>{value}</Text>
+      </View>
     </View>
-  );
-}
-
-function TabItem({
-  label,
-  icon,
-  active = false,
-  color,
-  onPress,
-}: {
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  active?: boolean;
-  color: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} style={styles.tabItem} hitSlop={6}>
-      <Ionicons
-        name={icon}
-        size={23}
-        color={active ? color : C.muted}
-      />
-      <Text style={[styles.tabLabel, { color: active ? color : C.muted }]}>
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -2053,6 +2518,10 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: C.bg,
+  },
+
+  mainScroll: {
+    flex: 1,
   },
 
   container: {
@@ -2111,10 +2580,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  header: {
+  /* Slim header */
+
+  stickyHeader: {
+    paddingHorizontal: 14,
+    backgroundColor: '#FBF1F2',
+    zIndex: 50,
+  },
+
+  headerRow: {
+    height: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+
+  headerHairline: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 1,
+    backgroundColor: 'rgba(138, 58, 80, 0.12)',
   },
 
   headerTitleGroup: {
@@ -2124,38 +2611,40 @@ const styles = StyleSheet.create({
   },
 
   headerTextGroup: {
-    marginLeft: 8,
+    marginLeft: 6,
   },
 
-  eyebrow: {
-    fontSize: 9,
-    letterSpacing: 2.2,
-    fontWeight: '600',
-  },
-
-  headerTitle: {
-    marginTop: 2,
-    fontSize: 29,
-    fontWeight: '300',
-    letterSpacing: 0.2,
-  },
-
-  headerSubtitle: {
-    marginTop: 2,
-    fontSize: 12,
-    color: C.muted,
-  },
-
-  headerCalendar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  headerBack: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: 'rgba(255,255,255,0.65)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.9)',
   },
 
-  headerCalendarContent: {
+  headerBackContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '400',
+    letterSpacing: 0.2,
+  },
+
+  headerBell: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.65)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.9)',
+  },
+
+  headerBellContent: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2163,12 +2652,12 @@ const styles = StyleSheet.create({
 
   bellBadge: {
     position: 'absolute',
-    top: 2,
-    right: 2,
-    minWidth: 17,
-    height: 17,
+    top: -3,
+    right: -3,
+    minWidth: 16,
+    height: 16,
     paddingHorizontal: 4,
-    borderRadius: 9,
+    borderRadius: 8,
     backgroundColor: C.pink,
     borderWidth: 1.5,
     borderColor: '#FFFFFF',
@@ -2182,8 +2671,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
+  todayDateBlock: { paddingHorizontal: 4, marginTop: 2 },
+  todayDateLabel: { color: C.muted, fontSize: 10, fontWeight: '600', letterSpacing: 0.8, textTransform: 'uppercase' },
+  todayDateValue: { color: C.text, fontSize: 16, fontWeight: '700', marginTop: 3 },
+
   dateStrip: {
-    paddingTop: 22,
+    paddingTop: 10,
     paddingBottom: 8,
     gap: 9,
   },
@@ -2332,6 +2825,68 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
 
+  /* Cycle overview (minimalist) */
+
+  overviewHeading: {
+    marginTop: 18,
+    marginBottom: 8,
+  },
+  overviewTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: C.text,
+    letterSpacing: 0.1,
+  },
+  overviewCard: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 18,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.95)',
+  },
+  overviewStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  overviewStat: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  overviewStatCopy: { flexShrink: 1 },
+  overviewStatLabel: { fontSize: 9, color: C.muted },
+  overviewStatValue: { marginTop: 1, fontSize: 12, fontWeight: '700', color: C.text },
+  overviewVDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: C.line,
+  },
+  overviewDivider: {
+    height: 1,
+    backgroundColor: C.line,
+  },
+  overviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 32,
+  },
+  overviewRowText: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '600',
+    color: C.text,
+  },
+  overviewSwitch: {
+    transform: [{ scale: 0.75 }],
+    marginRight: -6,
+  },
+
   featureScroller: {
     gap: 11,
     paddingRight: 20,
@@ -2392,6 +2947,32 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
 
+  betweenUsButton: {
+    marginTop: 13,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.95)',
+  },
+  betweenUsButtonContent: {
+    minHeight: 68,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    gap: 12,
+  },
+  betweenUsIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: C.purpleSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  betweenUsButtonCopy: { flex: 1 },
+  betweenUsButtonTitle: { fontSize: 14, fontWeight: '700', color: C.text },
+  betweenUsButtonSubtitle: { marginTop: 3, fontSize: 11, color: C.muted },
+
   relationshipCard: {
     width: 158,
     minHeight: 150,
@@ -2451,36 +3032,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  summaryRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-
-  summaryCard: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 105,
-    padding: 11,
-    borderRadius: 19,
-    backgroundColor: C.card,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.9)',
-  },
-
-  summaryLabel: {
-    marginTop: 9,
-    fontSize: 10,
-    color: C.muted,
-  },
-
-  summaryValue: {
-    marginTop: 4,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '600',
-    color: C.text,
-  },
-
   emptyCard: {
     padding: 23,
     alignItems: 'center',
@@ -2529,6 +3080,167 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: C.pink,
+  },
+
+  dailyCaption: { color: C.muted, fontSize: 11, lineHeight: 16 },
+  dailyLabel: { color: C.muted, fontSize: 11, fontWeight: '600', marginTop: 5 },
+  dailyChipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  choiceChip: { paddingHorizontal: 11, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: C.line, backgroundColor: C.white },
+  choiceChipActive: { backgroundColor: C.pinkSoft, borderColor: C.pink },
+  choiceText: { color: C.muted, fontSize: 11, fontWeight: '600' },
+  choiceTextActive: { color: C.pink },
+  dailyInput: { minHeight: 40, borderWidth: 1, borderColor: C.line, backgroundColor: C.white, borderRadius: 12, paddingHorizontal: 11, color: C.text, fontSize: 12 },
+  dailyInputRow: { flexDirection: 'row', gap: 9 },
+  dailySave: { borderRadius: 16, alignItems: 'center', padding: 12, backgroundColor: C.pink },
+  dailySaveText: { color: C.white, fontSize: 12, fontWeight: '700' },
+  dailyHistory: { color: C.muted, fontSize: 11, paddingVertical: 5, borderTopWidth: 1, borderTopColor: C.line },
+  supplementRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  takenButton: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 14, borderWidth: 1, borderColor: C.line },
+  takenButtonActive: { backgroundColor: W.tileActive, borderColor: W.tileActiveBorder },
+  statusOverlayRoot: { flex: 1, justifyContent: 'center', paddingHorizontal: 24 },
+  statusOverlayCard: { padding: 20, borderRadius: 24, backgroundColor: C.white, gap: 14, shadowColor: '#252238', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.16, shadowRadius: 20, elevation: 8 },
+  statusSuggestionWrap: { marginTop: 4 },
+  wellnessSection: { marginTop: 8, gap: 8 },
+  wellnessActions: { flexDirection: 'row', gap: 8 },
+  wellnessAction: { flex: 1, minHeight: 76, paddingHorizontal: 7, paddingVertical: 7, borderRadius: 15, backgroundColor: C.card, borderWidth: 1, borderColor: 'rgba(255,255,255,0.95)', alignItems: 'center', justifyContent: 'center', gap: 5 },
+  wellnessActionIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  wellnessActionTitle: { color: C.text, fontSize: 10, lineHeight: 13, fontWeight: '700', textAlign: 'center' },
+  sharedWellnessValue: { color: W.ink, fontSize: 13, lineHeight: 19, fontWeight: '600' },
+  cravingHistoryRow: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: C.line },
+
+  /* Daily Wellness overlay (compact floating card) */
+
+  wellSheet: {
+    maxHeight: '68%',
+    marginHorizontal: 12,
+    backgroundColor: W.sheet,
+    borderRadius: 28,
+    overflow: 'hidden',
+    shadowColor: '#6B3A48',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  wellHandle: {
+    alignSelf: 'center',
+    marginTop: 8,
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: W.handle,
+  },
+  wellHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
+  wellHeaderCenter: { flex: 1, alignItems: 'center' },
+  wellClose: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  wellTitle: { fontSize: 19, fontWeight: '700', color: W.ink, letterSpacing: 0.1 },
+  wellSubtitle: { marginTop: 2, fontSize: 12, color: W.inkSoft, textAlign: 'center' },
+  wellScroll: { paddingHorizontal: 14, paddingTop: 4, paddingBottom: 14, gap: 9 },
+  wellCard: {
+    padding: 11,
+    borderRadius: 18,
+    backgroundColor: W.card,
+    borderWidth: 1,
+    borderColor: W.cardBorder,
+    gap: 8,
+  },
+  wellCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  wellCardIcon: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: W.tileActive,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wellCardTitle: { fontSize: 14, fontWeight: '700', color: W.ink },
+
+  moodGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  moodTile: {
+    width: '31.6%',
+    flexGrow: 1,
+    paddingVertical: 7,
+    borderRadius: 16,
+    backgroundColor: W.tile,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    alignItems: 'center',
+    gap: 3,
+  },
+  moodTileActive: { backgroundColor: W.tileActive, borderColor: W.tileActiveBorder },
+  moodFace: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: W.face,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moodFaceEmoji: { fontSize: 16 },
+  moodLabel: { fontSize: 11, color: W.inkSoft, fontWeight: '500' },
+  moodLabelActive: { color: W.ink, fontWeight: '700' },
+
+  energyRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  energyCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: W.tile,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  energyCircleActive: { backgroundColor: W.accentDeep },
+  energyText: { fontSize: 16, color: W.ink, fontWeight: '500' },
+  energyTextActive: { color: C.white, fontWeight: '700' },
+
+  flowRow: { flexDirection: 'row', gap: 7 },
+  flowPill: {
+    flex: 1,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: W.tile,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  flowPillActive: { backgroundColor: W.tileActive, borderColor: W.tileActiveBorder },
+  flowText: { fontSize: 13, color: W.inkSoft, fontWeight: '500' },
+  flowTextActive: { color: W.ink, fontWeight: '700' },
+
+  wellSave: {
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: W.accent,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  wellSaveText: { color: C.white, fontSize: 14, fontWeight: '700' },
+
+  wellChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: W.tile,
+  },
+  wellChipText: { fontSize: 12, color: W.ink, fontWeight: '600' },
+  wellInput: {
+    minHeight: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: W.cardBorder,
+    backgroundColor: W.sheet,
+    paddingHorizontal: 12,
+    color: W.ink,
+    fontSize: 13,
   },
 
   smallAction: {
@@ -2595,6 +3307,30 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.95)',
   },
 
+  logsModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 18,
+  },
+  logsModalTitleGroup: { flex: 1, paddingRight: 12 },
+  closeButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.pinkSoft,
+  },
+  logsEmpty: {
+    padding: 22,
+    borderRadius: 20,
+    alignItems: 'center',
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.95)',
+  },
+
   logRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2636,26 +3372,6 @@ const styles = StyleSheet.create({
     padding: 7,
   },
 
-  moreLogs: {
-    paddingVertical: 13,
-    borderTopWidth: 1,
-    borderTopColor: C.line,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-
-  moreLogsText: {
-    fontSize: 11,
-    color: C.muted,
-  },
-
-  moreLogsLink: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: C.pink,
-  },
-
   sharedNote: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -2684,34 +3400,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 17,
     color: C.muted,
-  },
-
-  tabBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    borderTopLeftRadius: 25,
-    borderTopRightRadius: 25,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.95)',
-    paddingTop: 10,
-  },
-
-  tabItem: {
-    minWidth: 85,
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  tabLabel: {
-    marginTop: 3,
-    fontSize: 10,
   },
 
   modalRoot: {
@@ -2765,12 +3453,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: C.text,
     fontWeight: '600',
-  },
-
-  chipWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
   },
 
   chip: {
@@ -2829,86 +3511,6 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     fontSize: 14,
     color: C.muted,
-  },
-
-  /* Notifications */
-
-  notifHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-
-  notifList: {
-    marginTop: 18,
-  },
-
-  notifRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    padding: 13,
-    borderRadius: 18,
-    backgroundColor: '#FAF8FA',
-    borderWidth: 1,
-    borderColor: C.line,
-  },
-
-  notifRowUnread: {
-    backgroundColor: '#FFF6F8',
-    borderColor: C.pinkBorder,
-  },
-
-  notifRowGap: {
-    marginBottom: 10,
-  },
-
-  notifIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  notifText: {
-    flex: 1,
-    marginLeft: 12,
-  },
-
-  notifTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: C.text,
-  },
-
-  notifQuoted: {
-    marginTop: 4,
-    fontSize: 11,
-    color: C.faint,
-    fontStyle: 'italic',
-  },
-
-  notifBody: {
-    marginTop: 4,
-    fontSize: 12,
-    lineHeight: 17,
-    color: C.text,
-  },
-
-  notifTime: {
-    marginTop: 6,
-    fontSize: 10,
-    color: C.muted,
-  },
-
-  unreadDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: C.pink,
-    marginLeft: 8,
-    marginTop: 5,
   },
 
   /* Compose */
