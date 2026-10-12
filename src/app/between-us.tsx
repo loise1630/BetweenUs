@@ -2,6 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import CycleTabBar from '../components/CycleTabBar';
 import { IconButton, PressScale, Screen } from '../lib/ui';
 
 const COLORS = {
@@ -67,43 +68,47 @@ const FEATURES = [
 export default function BetweenUsScreen() {
   return (
     <Screen>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <IconButton name="arrow-back" onPress={() => router.back()} />
-          <View style={styles.headerCopy}>
-            <Text style={styles.kicker}>YOUR SHARED SPACE</Text>
-            <Text style={styles.title}>Between Us</Text>
-            <Text style={styles.subtitle}>Small prompts can help you start. Add your own words inside each space.</Text>
+      <View style={styles.screen}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <View style={styles.header}>
+            <IconButton name="arrow-back" onPress={() => router.back()} />
+            <View style={styles.headerCopy}>
+              <Text style={styles.kicker}>YOUR SHARED SPACE</Text>
+              <Text style={styles.title}>Between Us</Text>
+              <Text style={styles.subtitle}>Small prompts can help you start. Add your own words inside each space.</Text>
+            </View>
           </View>
-        </View>
 
-        <View style={styles.grid}>
-          {FEATURES.map((feature) => (
-            <PressScale
-              key={feature.title}
-              onPress={() => router.push(feature.route as never)}
-              style={styles.card}
-              contentStyle={styles.cardContent}
-            >
-              <View style={[styles.iconWrap, { backgroundColor: feature.tint }]}>
-                <Ionicons name={feature.icon} size={20} color={feature.color} />
-              </View>
-              <Text style={styles.cardTitle}>{feature.title}</Text>
-              <Text style={styles.cardDescription}>{feature.description}</Text>
-              <Text style={styles.suggestion}>{feature.suggestion}</Text>
-              <View style={styles.openRow}>
-                <Text style={[styles.openText, { color: feature.color }]}>Open</Text>
-                <Ionicons name="arrow-forward" size={15} color={feature.color} />
-              </View>
-            </PressScale>
-          ))}
-        </View>
-      </ScrollView>
+          <View style={styles.grid}>
+            {FEATURES.map((feature) => (
+              <PressScale
+                key={feature.title}
+                onPress={() => router.push(feature.route as never)}
+                style={styles.card}
+                contentStyle={styles.cardContent}
+              >
+                <View style={[styles.iconWrap, { backgroundColor: feature.tint }]}>
+                  <Ionicons name={feature.icon} size={20} color={feature.color} />
+                </View>
+                <Text style={styles.cardTitle}>{feature.title}</Text>
+                <Text style={styles.cardDescription}>{feature.description}</Text>
+                <Text style={styles.suggestion}>{feature.suggestion}</Text>
+                <View style={styles.openRow}>
+                  <Text style={[styles.openText, { color: feature.color }]}>Open</Text>
+                  <Ionicons name="arrow-forward" size={15} color={feature.color} />
+                </View>
+              </PressScale>
+            ))}
+          </View>
+        </ScrollView>
+        <CycleTabBar active="between-us" />
+      </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: { flex: 1 },
   content: { padding: 20, paddingBottom: 34 },
   header: { flexDirection: 'row', alignItems: 'flex-start', gap: 14, marginBottom: 22 },
   headerCopy: { flex: 1, paddingTop: 4 },

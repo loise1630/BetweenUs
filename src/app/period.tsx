@@ -48,6 +48,7 @@ import {
 import { getAccountState } from '../lib/account';
 import { CycleDailyLog, DailyStatus, getCycleDailyLogs, getDailyStatus, getSharedDailyWellness, saveCycleDailyLog, saveDailyStatus, saveSharedCravings, saveSharedDailyWellness, SharedDailyWellness, subscribeCycleFeatures } from '../lib/cycleFeatures';
 import { loadNotificationsModule, scheduleCycleReminders } from '../lib/pushNotifications';
+import { formatPredictionWindow, predictCycle } from '../lib/cyclePrediction';
 
 // ⚠️ Adjust these names if your partnerMessages.ts exports different ones.
 import {
@@ -513,7 +514,11 @@ export default function PeriodScreen() {
         : data.own.settings;
       const predicted = getPredictedNextPeriod(reminderPeriods, reminderSettings.average_cycle_length);
       const current = getCurrentCycleInfo(reminderPeriods, reminderSettings);
-      void scheduleCycleReminders(predicted, current.fertileWindow.start, isPartnerView).catch((error) => console.warn('Could not schedule cycle reminders:', error));
+      const fertilityPrediction = predictCycle(reminderPeriods, reminderSettings);
+      const fertileWindowStart = fertilityPrediction.confidence === 'higher'
+        ? current.fertileWindow.start
+        : null;
+      void scheduleCycleReminders(predicted, fertileWindowStart, isPartnerView).catch((error) => console.warn('Could not schedule cycle reminders:', error));
     } catch (error: any) {
       console.error('PERIOD LOAD ERROR:', error);
       const cacheKey = resolvedId ? `@betweenus_dashboard_v1_${resolvedId}` : null;
@@ -688,8 +693,23 @@ export default function PeriodScreen() {
 
   const today = todayString();
   const hasCycleData = periods.length > 0;
-  const cycleLength = settings.average_cycle_length || 28;
+  const cyclePrediction = useMemo(
+    () => predictCycle(periods, settings, today),
+    [periods, settings, today],
+  );
+  const cycleLength = cyclePrediction.cycleLengthUsed || settings.average_cycle_length || 28;
   const periodLength = settings.average_period_length || 5;
+  const todayIsEstimatedFertile =
+    cyclePrediction.confidence === 'higher' &&
+    !!cyclePrediction.fertileWindowStart &&
+    !!cyclePrediction.fertileWindowEnd &&
+    today >= cyclePrediction.fertileWindowStart &&
+    today <= cyclePrediction.fertileWindowEnd;
+  const fertilityNote = todayIsEstimatedFertile
+    ? 'Estimated fertile window · pregnancy chance may be higher'
+    : cyclePrediction.confidence === 'higher'
+      ? 'Pregnancy can still be possible outside this estimate'
+      : 'Pregnancy is possible; date-based timing is uncertain';
 
   const latestPeriod = useMemo(
     () =>
@@ -724,7 +744,7 @@ export default function PeriodScreen() {
   const theme = PHASE_THEME[shownPhase];
   const accent = activeCopy.accent;
 
-  const predictedNext = getPredictedNextPeriod(periods, cycleLength);
+  const predictedNext = cyclePrediction.nextPeriodDate;
   const nextPhaseEstimate = hasCycleData
     ? getNextPhaseEstimate(
         currentCycle.phase,
@@ -1463,6 +1483,16 @@ export default function PeriodScreen() {
                 />
               </View>
 
+              <Text style={styles.predictionNote}>
+                {cyclePrediction.historyCount > 1
+                  ? `Expected window: ${formatPredictionWindow(cyclePrediction.nextPeriodWindowStart, cyclePrediction.nextPeriodWindowEnd)}. ${cyclePrediction.summary}`
+                  : `Early estimate window: ${formatPredictionWindow(cyclePrediction.nextPeriodWindowStart, cyclePrediction.nextPeriodWindowEnd)}. ${cyclePrediction.summary}`}
+              </Text>
+              <View style={styles.fertilityNote}>
+                <Ionicons name="heart-outline" size={12} color={C.muted} />
+                <Text style={styles.fertilityNoteText}>{fertilityNote}</Text>
+              </View>
+
               <View style={styles.overviewDivider} />
 
               <View style={styles.overviewRow}>
@@ -1964,23 +1994,6 @@ export default function PeriodScreen() {
                 ))}
               </View>
             )}
-          </View>
-
-          <View>
-            <PressScale
-              onPress={() => openRoute(ROUTES.betweenUs)}
-              style={styles.betweenUsButton}
-              contentStyle={styles.betweenUsButtonContent}
-            >
-              <View style={styles.betweenUsIcon}>
-                <Ionicons name="people-outline" size={20} color={C.purple} />
-              </View>
-              <View style={styles.betweenUsButtonCopy}>
-                <Text style={styles.betweenUsButtonTitle}>Between Us</Text>
-                <Text style={styles.betweenUsButtonSubtitle}>Little ways to feel closer, together</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={19} color={C.muted} />
-            </PressScale>
           </View>
 
           {!viewerMode ? (
@@ -2861,6 +2874,9 @@ const styles = StyleSheet.create({
   overviewStatCopy: { flexShrink: 1 },
   overviewStatLabel: { fontSize: 9, color: C.muted },
   overviewStatValue: { marginTop: 1, fontSize: 12, fontWeight: '700', color: C.text },
+  predictionNote: { paddingHorizontal: 10, paddingBottom: 8, color: C.muted, fontSize: 10, lineHeight: 14 },
+  fertilityNote: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingBottom: 9 },
+  fertilityNoteText: { flex: 1, color: C.muted, fontSize: 10, lineHeight: 13 },
   overviewVDivider: {
     width: 1,
     height: 24,
@@ -2946,32 +2962,6 @@ const styles = StyleSheet.create({
     paddingRight: 20,
     paddingBottom: 4,
   },
-
-  betweenUsButton: {
-    marginTop: 13,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.95)',
-  },
-  betweenUsButtonContent: {
-    minHeight: 68,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    gap: 12,
-  },
-  betweenUsIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: C.purpleSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  betweenUsButtonCopy: { flex: 1 },
-  betweenUsButtonTitle: { fontSize: 14, fontWeight: '700', color: C.text },
-  betweenUsButtonSubtitle: { marginTop: 3, fontSize: 11, color: C.muted },
 
   relationshipCard: {
     width: 158,

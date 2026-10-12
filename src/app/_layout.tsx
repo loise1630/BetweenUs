@@ -46,7 +46,6 @@ export default function RootLayout() {
           '/home',
           '/settings',
           '/boyfriend',
-          '/girlfriend',
           '/period',
           '/period-setup',
           '/period-calendar',

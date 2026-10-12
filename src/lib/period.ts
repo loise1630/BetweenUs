@@ -11,6 +11,7 @@
 // ============================================================
 
 import { supabase } from './supabase';
+import { getPersonalizedCycleLength } from './cyclePrediction';
 
 // ============================================================
 // TYPES
@@ -377,9 +378,14 @@ export function getPredictedNextPeriod(
       ? cycleLength
       : 28;
 
+  const personalizedCycleLength =
+    getPersonalizedCycleLength(periods, {
+      average_cycle_length: safeCycleLength,
+    }) ?? safeCycleLength;
+
   return addDays(
     latest.start_date,
-    safeCycleLength
+    personalizedCycleLength
   );
 }
 
@@ -412,6 +418,9 @@ export function getCurrentCycleInfo(
   }
 
   const today = getTodayString();
+  const cycleLength =
+    getPersonalizedCycleLength(periods, safeSettings) ??
+    safeSettings.average_cycle_length;
 
   let cycleDay = getCycleDay(
     latestPeriod.start_date,
@@ -427,26 +436,26 @@ export function getCurrentCycleInfo(
 
   const phase = getCyclePhase(
     cycleDay,
-    safeSettings.average_cycle_length,
+    cycleLength,
     calculatePeriodLength(latestPeriod) ?? safeSettings.average_period_length
   );
 
   const nextPeriod =
     getPredictedNextPeriod(
       periods,
-      safeSettings.average_cycle_length
+      cycleLength
     );
 
   const ovulationDate =
     getEstimatedOvulationDate(
       latestPeriod.start_date,
-      safeSettings.average_cycle_length
+      cycleLength
     );
 
   const fertileWindow =
     getFertileWindow(
       latestPeriod.start_date,
-      safeSettings.average_cycle_length
+      cycleLength
     );
 
   return {
@@ -471,9 +480,11 @@ export function getCycleInfoForDate(
   const safeSettings =
     settings || DEFAULT_SETTINGS;
 
+  const configuredCycleLength =
+    Number(safeSettings.average_cycle_length) || 28;
   const cycleLength =
-    Number(safeSettings.average_cycle_length) ||
-    28;
+    getPersonalizedCycleLength(periods, safeSettings) ??
+    configuredCycleLength;
 
   const periodLength =
     Number(safeSettings.average_period_length) ||

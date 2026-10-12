@@ -367,11 +367,7 @@ export default function HomeScreen() {
   const handleContinue = async () => {
     if (!canContinue) return;
 
-    if (selectedRole === 'boyfriend') {
-      router.push({ pathname: '/boyfriend', params: { role: 'boyfriend' } });
-    } else {
-      router.push({ pathname: '/girlfriend', params: { role: 'girlfriend' } });
-    }
+    router.push({ pathname: '/period', params: { role: selectedRole } });
   };
 
   const toggleHidden = () => {

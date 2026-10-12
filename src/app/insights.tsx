@@ -182,7 +182,7 @@ export default function InsightsScreen() {
               <Text style={styles.muted}>{cycle.phase === 'Luteal' ? 'Luteal · Try a gentle walk, stretching, or a lighter workout if that feels better.' : cycle.phase === 'Period' ? 'Period · Rest or choose gentle movement based on how you feel.' : cycle.phase === 'Ovulation' ? 'Ovulation · Choose movement that feels comfortable; energy can vary.' : 'Follicular · Gradually build activity if your energy is increasing.'}</Text>
             </View>
 
-            <Text style={styles.footnote}>Cycle, ovulation, and fertile-window dates are estimates and may vary.</Text>
+            <Text style={styles.footnote}>Cycle dates are estimates based on logged history. Calendar-based ovulation and fertile-window predictions can be wrong and should never be used to prevent pregnancy.</Text>
           </ScrollView>
         )}
         <CycleTabBar active="insights" />

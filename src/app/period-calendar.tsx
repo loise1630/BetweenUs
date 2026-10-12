@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { Ionicons } from '@expo/vector-icons';
 
 import CycleTabBar from '../components/CycleTabBar';
+import { predictCycle } from '../lib/cyclePrediction';
 import { useCycleDashboard } from '../hooks/use-cycle-dashboard';
 import { getCycleInfoForDate, getSymptomsForDate, isDateInPeriod, parseDate } from '../lib/period';
 import { Screen } from '../lib/ui';
@@ -23,7 +24,8 @@ export default function PeriodCalendarScreen() {
   const { loading, error, viewerMode, periods, symptoms, settings, reload } = useCycleDashboard();
   const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12));
   const [selectedDate, setSelectedDate] = useState(today());
-  const cycleLength = settings.average_cycle_length || 28;
+  const prediction = useMemo(() => predictCycle(periods, settings), [periods, settings]);
+  const cycleLength = prediction.cycleLengthUsed || settings.average_cycle_length || 28;
   const periodLength = settings.average_period_length || 5;
   const latest = useMemo(() => [...periods].sort((a, b) => b.start_date.localeCompare(a.start_date))[0] ?? null, [periods]);
   const days = useMemo(() => {
@@ -39,6 +41,12 @@ export default function PeriodCalendarScreen() {
   }, [month]);
   const selectedSymptoms = getSymptomsForDate(symptoms, selectedDate);
   const selectedInfo = getCycleInfoForDate(periods, settings, selectedDate);
+  const selectedInsideFertileEstimate =
+    prediction.confidence === 'higher' &&
+    !!prediction.fertileWindowStart &&
+    !!prediction.fertileWindowEnd &&
+    selectedDate >= prediction.fertileWindowStart &&
+    selectedDate <= prediction.fertileWindowEnd;
   const selectedPeriod = periods.some((period) => isDateInPeriod(selectedDate, period, periodLength));
   const isTodaySelected = selectedDate === today();
   const selectedLabel = parseDate(selectedDate).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
@@ -91,16 +99,25 @@ export default function PeriodCalendarScreen() {
                   if (!date) return <View key={`blank-${index}`} style={styles.dayCell} />;
                   const dayInfo = periods.length ? getCycleInfoForDate(periods, settings, date) : null;
                   const actualPeriodDay = periods.some((period) => isDateInPeriod(date, period, periodLength));
-                  const periodDay = actualPeriodDay || (!!latest && date >= latest.start_date && !!dayInfo?.cycleDay && dayInfo.cycleDay <= periodLength);
+                  const predictedPeriodDay = Boolean(
+                    prediction.nextPeriodWindowStart &&
+                    prediction.nextPeriodWindowEnd &&
+                    date >= today() &&
+                    date >= prediction.nextPeriodWindowStart &&
+                    date <= prediction.nextPeriodWindowEnd
+                  );
+                  const periodDay = actualPeriodDay || predictedPeriodDay;
                   const ovulationCycleDay = Math.max(1, cycleLength - 14);
-                  const fertileDay = !!latest && date >= latest.start_date && !!dayInfo?.cycleDay && dayInfo.cycleDay >= ovulationCycleDay - 5 && dayInfo.cycleDay <= ovulationCycleDay + 1;
-                  const ovulationDay = !!latest && date >= latest.start_date && dayInfo?.cycleDay === ovulationCycleDay;
+                  const showFertilityEstimate = prediction.confidence === 'higher';
+                  const withinPredictedCycle = !!prediction.nextPeriodWindowEnd && date <= prediction.nextPeriodWindowEnd;
+                  const fertileDay = showFertilityEstimate && withinPredictedCycle && !!latest && date >= latest.start_date && !!dayInfo?.cycleDay && dayInfo.cycleDay >= ovulationCycleDay - 5 && dayInfo.cycleDay <= ovulationCycleDay + 1;
+                  const ovulationDay = showFertilityEstimate && withinPredictedCycle && !!latest && date >= latest.start_date && dayInfo?.cycleDay === ovulationCycleDay;
                   const selected = selectedDate === date;
                   const isToday = date === today();
                   const hasSymptom = symptoms.some((item) => item.symptom_date === date);
                   return (
-                    <Pressable key={date} accessibilityRole="button" accessibilityLabel={`${parseDate(date).toDateString()}${periodDay ? ', period day' : ''}`} onPress={() => setSelectedDate(date)} style={styles.dayCell}>
-                      <View style={[styles.dayCircle, periodDay && styles.periodDay, fertileDay && !periodDay && styles.fertileDay, selected && styles.selectedDay, isToday && !selected && styles.todayDay]}>
+                    <Pressable key={date} accessibilityRole="button" accessibilityLabel={`${parseDate(date).toDateString()}${actualPeriodDay ? ', logged period day' : predictedPeriodDay ? ', expected period range' : ''}`} onPress={() => setSelectedDate(date)} style={styles.dayCell}>
+                      <View style={[styles.dayCircle, actualPeriodDay && styles.periodDay, predictedPeriodDay && !actualPeriodDay && styles.predictedPeriodDay, fertileDay && !periodDay && styles.fertileDay, selected && styles.selectedDay, isToday && !selected && styles.todayDay]}>
                         <Text style={[styles.dayText, periodDay && !selected && styles.periodText, selected && styles.selectedText]}>{parseDate(date).getDate()}</Text>
                       </View>
                       <View style={styles.dots}>
@@ -113,9 +130,10 @@ export default function PeriodCalendarScreen() {
               </View>
 
               <View style={styles.legend}>
-                <Legend color={PINK} label="Period" />
-                <Legend color="#F7E9B7" label="Fertile window" />
-                <Legend color={PURPLE} label="Ovulation" />
+                <Legend color={PINK} label="Logged period" />
+                {prediction.nextPeriodWindowStart ? <Legend color="#FCEFF2" label="Expected range" /> : null}
+                {prediction.confidence === 'higher' ? <Legend color="#F7E9B7" label="Est. fertile window" /> : null}
+                {prediction.confidence === 'higher' ? <Legend color={PURPLE} label="Est. ovulation" /> : null}
               </View>
             </View>
 
@@ -123,8 +141,15 @@ export default function PeriodCalendarScreen() {
               <Text style={styles.detailEyebrow}>{isTodaySelected ? 'TODAY' : 'SELECTED DAY'}</Text>
               <Text style={styles.detailTitle}>{selectedLabel}</Text>
               <Text style={styles.detailPhase}>
-                {periods.length === 0 ? 'No cycle data yet' : selectedPeriod ? 'Period' : `${selectedInfo.phase} phase`}
+                {periods.length === 0 ? 'No cycle data yet' : selectedPeriod ? 'Logged period' : prediction.nextPeriodWindowStart && selectedDate >= prediction.nextPeriodWindowStart && selectedDate <= (prediction.nextPeriodWindowEnd ?? '') ? 'Expected period range' : `${selectedInfo.phase} phase`}
                 {periods.length > 0 && selectedInfo.cycleDay ? ` · Day ${selectedInfo.cycleDay}` : ''}
+              </Text>
+              <Text style={styles.fertilityHint}>
+                {selectedInsideFertileEstimate
+                  ? 'Estimated fertile window · pregnancy chance may be higher'
+                  : prediction.confidence === 'higher'
+                    ? 'Pregnancy can still be possible outside this estimate'
+                    : 'Pregnancy is possible; date-based timing is uncertain'}
               </Text>
               {selectedSymptoms.length ? (
                 <View style={styles.symptomWrap}>
@@ -135,7 +160,7 @@ export default function PeriodCalendarScreen() {
               )}
             </View>
 
-            <Text style={styles.footnote}>Cycle and fertile-window dates are estimates based on logged history.</Text>
+            <Text style={styles.footnote}>Period estimates use logged cycle history. Fertile-window estimates appear only after several consistent cycles and are never reliable contraception.</Text>
           </ScrollView>
         )}
 
@@ -168,6 +193,7 @@ const styles = StyleSheet.create({
   dayCircle: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: 17 },
   dayText: { color: TEXT, fontSize: 13 },
   periodDay: { backgroundColor: '#FDE7EC' },
+  predictedPeriodDay: { backgroundColor: '#FCEFF2', borderWidth: 1, borderColor: '#E7A2B0' },
   periodText: { color: '#CA526C', fontWeight: '700' },
   fertileDay: { backgroundColor: '#FCF5DE' },
   selectedDay: { backgroundColor: PINK },
@@ -183,6 +209,7 @@ const styles = StyleSheet.create({
   detailEyebrow: { color: PINK, fontSize: 10, fontWeight: '800', letterSpacing: 1.2 },
   detailTitle: { color: TEXT, fontSize: 19, fontWeight: '700', marginTop: 6 },
   detailPhase: { color: PURPLE, fontSize: 13, fontWeight: '600', marginTop: 5, marginBottom: 9 },
+  fertilityHint: { color: MUTED, fontSize: 10, lineHeight: 14, marginTop: -5, marginBottom: 9 },
   muted: { color: MUTED, fontSize: 12, lineHeight: 18 },
   symptomWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 5 },
   symptomPill: { backgroundColor: '#F6F1FC', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14 },

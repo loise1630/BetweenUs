@@ -12,8 +12,8 @@ import type {
  *
  * Prediction strategy:
  * 1. Calculate cycle intervals from actual period-start history.
- * 2. Detect obvious interval outliers with IQR.
- * 3. Give more weight to the most recent usable cycles.
+ * 2. Flag unusual intervals without excluding them from variability estimates.
+ * 3. Give more weight to the most recent cycles.
  * 4. Blend the recent weighted average with the median.
  * 5. Use the result to estimate the next period and cycle phase.
  *
@@ -45,7 +45,6 @@ export type CycleHistoryStats = {
     | 'moderate'
     | 'high';
   outlierCycleLengths: number[];
-  usableCycleLengths: number[];
 };
 
 export type CyclePrediction = {
@@ -71,12 +70,12 @@ export type CyclePrediction = {
 };
 
 const MIN_CYCLE = 15;
-const MAX_CYCLE = 60;
+const MAX_CYCLE = 90;
 const MIN_PERIOD = 1;
 const MAX_PERIOD = 14;
 
 /**
- * Only the most recent usable cycles are used for the
+ * Only the most recent observed cycles are used for the
  * short-term personalized weighted average.
  *
  * Five cycles gives enough recent history without allowing
@@ -220,11 +219,10 @@ export function getCycleLengths(
 }
 
 /**
- * Detect extreme cycle intervals using the IQR method.
+ * Flag extreme cycle intervals using the IQR method.
  *
- * A cycle is only treated as an outlier when there is enough
- * history and it falls clearly outside the normal distribution
- * of the user's logged intervals.
+ * These values are retained in the prediction range and variability
+ * calculations; the flag is informational and does not discard data.
  */
 function getOutlierValues(
   values: number[]
@@ -269,21 +267,10 @@ export function analyzeCycleHistory(
   const outlierCycleLengths =
     getOutlierValues(cycleLengths);
 
-  const usableCycleLengths =
-    cycleLengths.filter(
-      (value) =>
-        !outlierCycleLengths.includes(value)
-    );
-
-  /**
-   * Never throw away almost all of the user's history.
-   * If outlier removal leaves fewer than two usable cycles,
-   * use all valid intervals instead.
-   */
-  const effectiveValues =
-    usableCycleLengths.length >= 2
-      ? usableCycleLengths
-      : cycleLengths;
+  // Unusual cycles may be real, especially for people with irregular
+  // cycles. Keep them in the spread and confidence calculations instead
+  // of silently treating them as bad data.
+  const effectiveValues = cycleLengths;
 
   const medianCycleLength =
     median(effectiveValues);
@@ -329,7 +316,6 @@ export function analyzeCycleHistory(
     variabilityDays,
     variabilityLabel,
     outlierCycleLengths,
-    usableCycleLengths: effectiveValues,
   };
 }
 
@@ -431,7 +417,7 @@ export function getPersonalizedCycleLength(
     analyzeCycleHistory(periods);
 
   const usable =
-    stats.usableCycleLengths;
+    stats.cycleLengths;
 
   if (!usable.length) {
     const configured =
@@ -538,16 +524,13 @@ export function getPredictionConfidence(
     return 'low';
   }
 
-  if (
-    historyCount >= 6 &&
-    stats.variabilityLabel === 'low'
-  ) {
-    return 'higher';
+  if (stats.variabilityLabel === 'high') {
+    return 'low';
   }
 
   if (
     historyCount >= 5 &&
-    stats.variabilityLabel !== 'high'
+    stats.variabilityLabel === 'low'
   ) {
     return 'higher';
   }
@@ -556,13 +539,6 @@ export function getPredictionConfidence(
    * High variability should keep confidence conservative
    * even when the user has several records.
    */
-  if (
-    historyCount >= 4 &&
-    stats.variabilityLabel === 'high'
-  ) {
-    return 'moderate';
-  }
-
   return 'moderate';
 }
 
@@ -840,40 +816,20 @@ export function predictCycle(
    * - high variation → widest
    * - little history → conservative window
    */
-  let windowDays = 2;
-
-  if (
-    stats.variabilityLabel ===
-    'moderate'
-  ) {
-    windowDays = 3;
-  }
-
-  if (
-    stats.variabilityLabel ===
-    'high'
-  ) {
-    windowDays = 5;
-  }
-
-  if (confidence === 'low') {
-    windowDays = Math.max(
-      windowDays,
-      4
-    );
-  }
-
-  const nextPeriodWindowStart =
-    addDays(
-      predictedNextPeriod,
-      -windowDays
-    );
-
-  const nextPeriodWindowEnd =
-    addDays(
-      predictedNextPeriod,
-      windowDays
-    );
+  // Use the person's actual observed cycle-length spread. A fixed narrow
+  // window hides variability and is misleading for irregular cycles.
+  const hasMultipleObservedCycles = stats.cycleLengths.length >= 2;
+  const windowPadding = hasMultipleObservedCycles ? 1 : 7;
+  const shortestObservedCycle = stats.shortestCycleLength ?? cycleLength;
+  const longestObservedCycle = stats.longestCycleLength ?? cycleLength;
+  const nextPeriodWindowStart = addDays(
+    latest.start_date,
+    Math.max(MIN_CYCLE, shortestObservedCycle - windowPadding)
+  );
+  const nextPeriodWindowEnd = addDays(
+    latest.start_date,
+    Math.min(MAX_CYCLE, longestObservedCycle + windowPadding)
+  );
 
   /**
    * Ovulation estimate:
@@ -1013,7 +969,7 @@ export function formatCycleRange(
 }
 
 export function getPredictionDisclosure(): string {
-  return 'Cycle dates are estimates based on logged history. They can be less accurate when cycles are irregular and should not be used as contraception.';
+  return 'Period dates are estimates based on logged history. Irregular cycles can make the range broad. Ovulation and fertile-window dates are less reliable and should not be used to prevent pregnancy.';
 }
 
 export default {
