@@ -56,6 +56,8 @@ export default function RootLayout() {
           '/unsaid',
           '/little-things',
           '/between-us',
+          '/date-night',
+          '/open-when',
           '/what-i-love',
           '/bucket-list',
           '/check-in',

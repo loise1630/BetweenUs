@@ -157,18 +157,15 @@ export function isDateInPeriod(
 ): boolean {
   const start = period.start_date;
 
-  /*
-   * If no end date has been recorded yet,
-   * temporarily use the configured average period length.
-   */
-  const end =
-    period.end_date ||
-    addDays(
-      period.start_date,
-      Math.max(1, defaultLength) - 1
-    );
+  // An un-ended log means the period is still in progress. Treat it as
+  // logged through today; only use the configured length for future dates.
+  if (!period.end_date && date >= start) {
+    return date <= getTodayString() || date <= addDays(start, Math.max(1, defaultLength) - 1);
+  }
 
-  return date >= start && date <= end;
+  const end = period.end_date;
+
+  return date >= start && !!end && date <= end;
 }
 
 export function sortPeriods(
@@ -434,11 +431,14 @@ export function getCurrentCycleInfo(
     cycleDay = null;
   }
 
-  const phase = getCyclePhase(
-    cycleDay,
-    cycleLength,
-    calculatePeriodLength(latestPeriod) ?? safeSettings.average_period_length
-  );
+  const isOngoingPeriod = !latestPeriod.end_date && latestPeriod.start_date <= today;
+  const phase = isOngoingPeriod
+    ? 'Period'
+    : getCyclePhase(
+        cycleDay,
+        cycleLength,
+        calculatePeriodLength(latestPeriod) ?? safeSettings.average_period_length
+      );
 
   const nextPeriod =
     getPredictedNextPeriod(
@@ -529,11 +529,14 @@ export function getCycleInfoForDate(
       ? ((rawDay - 1) % cycleLength) + 1
       : rawDay;
 
-  const phase = getCyclePhase(
-    cycleDay,
-    cycleLength,
-    calculatePeriodLength(anchor) ?? periodLength
-  );
+  const isOngoingPeriod = !anchor.end_date && date <= getTodayString();
+  const phase = isOngoingPeriod
+    ? 'Period'
+    : getCyclePhase(
+        cycleDay,
+        cycleLength,
+        calculatePeriodLength(anchor) ?? periodLength
+      );
 
   return {
     cycleDay,

@@ -99,6 +99,26 @@ export async function addRelationshipEntry(
   return { ...data, role: account.role } as RelationshipEntry;
 }
 
+export async function updateRelationshipEntry(id: string, title: string, body: string): Promise<void> {
+  const cleanTitle = title.trim();
+  const cleanBody = body.trim();
+  if (!cleanTitle || !cleanBody) throw new Error('Add a title and your own words before saving.');
+  if (cleanTitle.length > 120 || cleanBody.length > 2000) {
+    throw new Error('Keep the title under 120 characters and the entry under 2,000 characters.');
+  }
+  const { userId } = await getPairedAccount();
+  const { error } = await supabase.from('relationship_entries')
+    .update({ title: cleanTitle, body: cleanBody, updated_at: new Date().toISOString() })
+    .eq('id', id).eq('user_id', userId);
+  if (error) throw error;
+}
+
+export async function deleteRelationshipEntry(id: string): Promise<void> {
+  const { userId } = await getPairedAccount();
+  const { error } = await supabase.from('relationship_entries').delete().eq('id', id).eq('user_id', userId);
+  if (error) throw error;
+}
+
 const DEFAULT_PREFERENCES: NotificationPreferences = {
   push_enabled: false,
   message_alerts: true,

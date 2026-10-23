@@ -19,6 +19,15 @@ const COLORS = {
 
 const FEATURES = [
   {
+    title: 'Date Night Generator',
+    description: 'Get a thoughtful plan for your next date, online or offline.',
+    suggestion: 'AI ideas when available, ready-made inspiration anytime.',
+    icon: 'sparkles' as const,
+    color: COLORS.peach,
+    tint: '#FFF0EB',
+    route: '/date-night',
+  },
+  {
     title: 'Wants',
     description: 'Little things you’d love each other to do.',
     suggestion: 'Try: “Plan a cozy date night.”',

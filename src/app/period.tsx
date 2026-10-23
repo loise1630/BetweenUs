@@ -765,6 +765,11 @@ export default function PeriodScreen() {
     : null;
 
   const displayPeriodLength = loggedPeriodLength || periodLength;
+  const periodIsExtended =
+    !!latestPeriod &&
+    latestPeriod.start_date <= today &&
+    (activeInfo.cycleDay || 0) > periodLength;
+  const periodIsOngoing = !!latestPeriod && !latestPeriod.end_date;
 
   // Notifications: only messages sent by my partner (not by me)
   const notifications: NotificationItem[] = useMemo(() => {
@@ -1121,6 +1126,24 @@ export default function PeriodScreen() {
     );
   }
 
+  async function keepPeriodOngoing() {
+    if (viewerMode || !latestPeriod) return;
+    if (periodIsOngoing) {
+      Alert.alert('Period is still active', 'Your cycle will stay in the Period phase until you mark the period as ended.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await updatePeriod(latestPeriod.id, latestPeriod.start_date, null, latestPeriod.notes || '');
+      await refresh();
+    } catch (error: any) {
+      Alert.alert('Could not update', error?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function deleteOwnPeriod(period: PeriodLog) {
     if (viewerMode) return;
 
@@ -1432,6 +1455,20 @@ export default function PeriodScreen() {
                     : 'Log your first period to begin tracking.'}
               </Text>
 
+              {!viewerMode && periodIsExtended ? (
+                <PressScale
+                  disabled={saving}
+                  onPress={keepPeriodOngoing}
+                  style={styles.ongoingPeriodButton}
+                  contentStyle={styles.managePeriodButtonContent}
+                >
+                  <Ionicons name="water-outline" size={16} color={theme.ink} />
+                  <Text style={[styles.managePeriodText, { color: theme.ink }]}>
+                    {periodIsOngoing ? 'Still on my period' : 'Still on my period?'}
+                  </Text>
+                </PressScale>
+              ) : null}
+
               {viewerMode && !hasCycleData ? (
                 <Pressable style={styles.outlineButton} onPress={() => { setComposeText('When you have a moment, could you add your period dates? I want to support you.'); setReplyTo(null); setComposeOpen(true); }}>
                   <Text style={styles.outlineButtonText}>Send a gentle reminder</Text>
@@ -1498,7 +1535,9 @@ export default function PeriodScreen() {
               <View style={styles.overviewRow}>
                 <Ionicons name="sparkles-outline" size={14} color={C.purple} />
                 <Text style={styles.overviewRowText} numberOfLines={1}>
-                  {nextPhaseEstimate
+                  {periodIsExtended && periodIsOngoing
+                    ? 'Period is ongoing · next phase updates when you end it'
+                    : nextPhaseEstimate
                     ? `Next: ${nextPhaseEstimate.phase} · ${nextPhaseEstimate.timing}`
                     : viewerMode
                       ? 'Her next phase appears once she logs a period.'
@@ -1587,6 +1626,14 @@ export default function PeriodScreen() {
               decelerationRate="fast"
               contentContainerStyle={styles.todayScroller}
             >
+              <RelationshipCard
+                title="Open When Letters"
+                subtitle="Write a little note for a moment they might need it."
+                icon="mail"
+                background={C.purpleSoft}
+                color={C.purple}
+                onPress={() => openRoute('/open-when')}
+              />
               <RelationshipCard
                 title="Today’s Want"
                 subtitle={
@@ -2797,6 +2844,16 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.48)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.9)',
+  },
+
+  ongoingPeriodButton: {
+    marginTop: 15,
+    paddingHorizontal: 17,
+    paddingVertical: 10,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.68)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.95)',
   },
 
   managePeriodButtonContent: {

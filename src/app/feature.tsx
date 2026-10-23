@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { getAccountState, type AccountRole } from '../lib/account';
-import { addRelationshipEntry, getRelationshipEntries, RelationshipEntry, RelationshipEntryType } from '../lib/relationshipData';
+import { addRelationshipEntry, deleteRelationshipEntry, getRelationshipEntries, RelationshipEntry, RelationshipEntryType, updateRelationshipEntry } from '../lib/relationshipData';
 import { Screen } from '../lib/ui';
 
 const CONFIG: Record<string, {
@@ -52,6 +52,7 @@ export default function Feature() {
   const [body, setBody] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -79,15 +80,34 @@ export default function Feature() {
     }
     try {
       setSaving(true);
-      await addRelationshipEntry(config.type, title, body);
+      if (editingId) await updateRelationshipEntry(editingId, title, body);
+      else await addRelationshipEntry(config.type, title, body);
       setTitle('');
       setBody('');
+      setEditingId(null);
       await load();
     } catch (error: any) {
       Alert.alert('Could not save this entry', error?.message || 'Please try again.');
     } finally {
       setSaving(false);
     }
+  }
+
+  function beginEdit(item: RelationshipEntry) {
+    setEditingId(item.id);
+    setTitle(item.title);
+    setBody(item.body);
+  }
+
+  function removeEntry(item: RelationshipEntry) {
+    Alert.alert('Delete this entry?', 'This will remove it from your shared space.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => {
+        void deleteRelationshipEntry(item.id).then(load).catch((error: any) => {
+          Alert.alert('Could not delete this entry', error?.message || 'Please try again.');
+        });
+      } },
+    ]);
   }
 
   return (
@@ -116,8 +136,9 @@ export default function Feature() {
           <TextInput value={body} onChangeText={setBody} maxLength={2000} multiline placeholder="Add your own words…" placeholderTextColor={COLORS.muted} style={[styles.input, styles.bodyInput]} />
           <Text style={styles.privacy}>Saved entries are shared with your connected partner.</Text>
           <Pressable onPress={() => void save()} disabled={saving} style={[styles.save, { backgroundColor: config.color }, saving && styles.disabled]}>
-            {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveText}>Share entry</Text>}
+            {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveText}>{editingId ? 'Save changes' : 'Share entry'}</Text>}
           </Pressable>
+          {editingId ? <Pressable onPress={() => { setEditingId(null); setTitle(''); setBody(''); }} style={styles.cancelEdit}><Text style={styles.cancelEditText}>Cancel editing</Text></Pressable> : null}
         </View>
 
         <View style={styles.entriesHeading}>
@@ -133,6 +154,10 @@ export default function Feature() {
             </View>
             <Text style={styles.entryTitle}>{item.title}</Text>
             <Text style={styles.entryBody}>{item.body}</Text>
+            {item.role === role ? <View style={styles.entryActions}>
+              <Pressable onPress={() => beginEdit(item)} accessibilityRole="button"><Text style={styles.actionText}>Edit</Text></Pressable>
+              <Pressable onPress={() => removeEntry(item)} accessibilityRole="button"><Text style={[styles.actionText, styles.deleteText]}>Delete</Text></Pressable>
+            </View> : null}
           </View>
         ))}
       </ScrollView>
@@ -169,4 +194,9 @@ const styles = StyleSheet.create({
   date: { color: COLORS.muted, fontSize: 10 },
   entryTitle: { marginTop: 9, color: COLORS.text, fontSize: 14, fontWeight: '700' },
   entryBody: { marginTop: 5, color: '#514E5D', fontSize: 13, lineHeight: 19 },
+  entryActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 18, marginTop: 12 },
+  actionText: { color: COLORS.pink, fontSize: 12, fontWeight: '700' },
+  deleteText: { color: '#A65361' },
+  cancelEdit: { alignItems: 'center', paddingVertical: 10 },
+  cancelEditText: { color: COLORS.muted, fontSize: 12, fontWeight: '600' },
 });
